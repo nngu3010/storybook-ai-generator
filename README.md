@@ -5,7 +5,9 @@ Auto-generate Storybook stories from React/TypeScript components. Detects compon
 ## Quick Start
 
 ```bash
-# Install and build
+# Clone and install
+git clone https://github.com/nngu3010/storybook-gen.git
+cd storybook-gen
 npm install && npm run build
 
 # Link globally (one time)
@@ -13,50 +15,94 @@ npm link
 
 # Generate stories for any React project
 cd ~/your-react-project
-storybook-gen generate ./src/components
+storybook-gen generate
 ```
 
 ## Commands
 
-### `generate <dir>` — Generate stories
+All commands default to the current directory when no `<dir>` is given.
+
+### `generate [dir]` — Generate stories
 
 ```bash
-# Generate stories for all components in a directory
-storybook-gen generate ./src/components
-
-# Preview without writing files
-storybook-gen generate ./src/components --dry-run
-
-# Overwrite existing story files
-storybook-gen generate ./src/components --overwrite
-
-# CI-safe: validate without writing anything (exits 1 on failure)
-storybook-gen generate ./src/components --check
+storybook-gen generate                         # scan current directory
+storybook-gen generate ./src/components        # scan a specific directory
+storybook-gen generate --dry-run               # preview without writing files
+storybook-gen generate --overwrite             # force overwrite existing stories
+storybook-gen generate --check                 # CI-safe: validate without writing (exits 1 on failure)
 ```
 
-### `verify <dir>` — Verify stories are in sync
+### `verify [dir]` — Verify stories are in sync
 
 ```bash
-# Check stories match current component props
-storybook-gen verify ./src/components
-
-# Also typecheck generated stories with tsc
-storybook-gen verify ./src/components --typecheck
+storybook-gen verify                           # check stories match current props
+storybook-gen verify --typecheck               # also typecheck with tsc
 ```
 
-### `watch <dir>` — Watch mode (coming soon)
+### `watch [dir]` — Watch mode
 
 ```bash
-storybook-gen watch ./src/components
+storybook-gen watch                            # watch current directory
+storybook-gen watch ./src/components           # watch a specific directory
+storybook-gen watch --overwrite                # overwrite stories on change
 ```
+
+Watch mode:
+- Generates a story when a new component file is added
+- Regenerates a story when a component changes
+- Deletes the story when a component is removed
+- Press `Ctrl+C` to stop
+
+### `init [dir]` — Add Windsurf Cascade skills
+
+```bash
+storybook-gen init                             # scaffold skills in current project
+storybook-gen init --force                     # overwrite existing skill files
+```
+
+Writes three [Windsurf Cascade](https://docs.windsurf.com/windsurf/cascade/skills) skills into `.windsurf/skills/`:
+
+| Skill | Trigger |
+|---|---|
+| `@storybook-generate` | user wants to generate / create / add stories |
+| `@storybook-verify` | user wants to check / validate / audit stories |
+| `@storybook-workflow` | user wants the full pipeline or to refresh all stories |
+
+Cascade also auto-invokes these skills when your request matches their description.
+
+### `update` — Update the tool
+
+```bash
+storybook-gen update
+```
+
+Pulls the latest changes from git and rebuilds. If the working directory has uncommitted changes, they are stashed and restored after the update. Falls back to a rebuild-only if no git remote is found.
+
+---
 
 ## Workflows
+
+### Full safe workflow
+
+```bash
+# 1. Check first (writes nothing)
+storybook-gen generate --check
+
+# 2. Generate (safe — never overwrites hand-edited files)
+storybook-gen generate
+
+# 3. Verify after
+storybook-gen verify --typecheck
+
+# 4. Build your app to make sure nothing broke
+npm run build
+```
 
 ### First-time setup
 
 ```bash
 # 1. Generate stories
-storybook-gen generate ./src/components
+storybook-gen generate
 
 # 2. Install Storybook (if not already installed)
 npx storybook@latest init
@@ -65,33 +111,24 @@ npx storybook@latest init
 npm run storybook
 ```
 
-### Full safe workflow
-
-```bash
-# 1. Check first (writes nothing)
-storybook-gen generate ./src/components --check
-
-# 2. Generate (safe — never overwrites hand-edited files)
-storybook-gen generate ./src/components
-
-# 3. Verify after
-storybook-gen verify ./src/components --typecheck
-
-# 4. Build your app to make sure nothing broke
-npm run build
-```
-
 ### After changing components
 
 ```bash
 # 1. Verify what's outdated
-storybook-gen verify ./src/components
+storybook-gen verify
 
 # 2. Regenerate (safe — never overwrites hand-edited stories)
-storybook-gen generate ./src/components
+storybook-gen generate
 
 # 3. Verify everything is in sync
-storybook-gen verify ./src/components --typecheck
+storybook-gen verify --typecheck
+```
+
+### Development (watch mode)
+
+```bash
+# Keep stories in sync as you build components
+storybook-gen watch
 ```
 
 ### CI pipeline
@@ -117,10 +154,10 @@ jobs:
         run: npm install -g storybook-gen
 
       - name: Check stories are valid and in sync
-        run: storybook-gen generate ./src/components --check
+        run: storybook-gen generate --check
 
       - name: Verify stories
-        run: storybook-gen verify ./src/components --typecheck
+        run: storybook-gen verify --typecheck
 
       - name: Build Storybook
         run: npm run build-storybook
@@ -130,8 +167,10 @@ jobs:
 
 ```bash
 # .husky/pre-commit
-storybook-gen verify ./src/components
+storybook-gen verify
 ```
+
+---
 
 ## Safety Guarantees
 
@@ -144,17 +183,19 @@ storybook-gen verify ./src/components
 | Duplicate exports | Structural validation catches these |
 | Re-running is destructive | Idempotent — skips unchanged components |
 
+---
+
 ## How It Works
 
 ### 1. Detects components
 
-Globs `**/*.tsx`, applies heuristics (default export, JSX return, capital letter naming). Skips test files, story files, barrel re-exports, and non-component utilities.
+Globs `**/*.tsx`, applies heuristics (default export, JSX return, capital letter naming). Skips test files, story files, barrel re-exports, and HOCs.
 
 ### 2. Extracts props
 
 Uses `ts-morph` to parse TypeScript types. Handles:
 - `React.FC<Props>` unwrapping
-- Intersection types (merges, filters `node_modules` props)
+- Intersection types (merges all properties, filters `node_modules` props)
 - Default values from destructuring
 - JSDoc comments and `@deprecated` tags
 
@@ -166,13 +207,14 @@ Uses `ts-morph` to parse TypeScript types. Handles:
 | `number` | `number` |
 | `boolean` | `boolean` |
 | `'a' \| 'b' \| 'c'` | `select` with options |
+| `1 \| 2 \| 3` | `select` with options |
 | `() => void` | `action` |
 | `ReactNode` | excluded from panel |
-| arrays, objects, CSSProperties | `object` |
+| arrays, objects, `CSSProperties` | `object` |
 
 ### 4. Generates variant stories
 
-String union props (like `variant: 'primary' | 'secondary' | 'danger'`) automatically get a named story per value. Priority: `variant > type > kind > size`.
+String union props (like `variant: 'primary' | 'secondary' | 'danger'`) automatically get a named story per value. Priority order: `variant > type > kind > size > color > theme`.
 
 ### 5. Collision protection
 
@@ -185,6 +227,8 @@ On re-run:
 - **Checksum matches** → skip (no change needed)
 - **Checksum differs, no `--overwrite`** → write `.stories.generated.ts` alongside
 - **Checksum differs, `--overwrite`** → replace the file
+
+---
 
 ## Example Output
 
@@ -207,6 +251,8 @@ export default function Button({ label, variant = 'primary', disabled = false, o
 Generates `Button.stories.ts`:
 ```ts
 // @storybook-gen checksum: a49a938c05dd generated: 2026-03-17
+// AUTO-GENERATED — do not edit this file manually.
+
 import type { Meta, StoryObj } from '@storybook/react';
 import Button from './Button';
 
@@ -218,7 +264,7 @@ const meta: Meta<typeof Button> = {
     label:    { control: 'text', description: "The text label" },
     variant:  { control: 'select', options: ['primary', 'secondary', 'danger'], description: "Visual style variant" },
     disabled: { control: 'boolean', description: "Whether the button is disabled" },
-    onClick:  { action: 'onClick', description: "Click handler" },
+    onClick:  { action: 'onClick' },
   },
 };
 
@@ -230,6 +276,19 @@ export const Primary:   Story = { args: { label: "", disabled: false, variant: '
 export const Secondary: Story = { args: { label: "", disabled: false, variant: 'secondary' } };
 export const Danger:    Story = { args: { label: "", disabled: false, variant: 'danger' } };
 ```
+
+---
+
+## Component Requirements for Best Results
+
+storybook-gen works best when components:
+- Have a **default export** (function or arrow function)
+- Have **typed props** with a TypeScript interface or type
+- Use **JSDoc comments** on props for auto-generated descriptions
+- Use **string literal unions** for variant props (e.g., `'primary' | 'secondary'`)
+- Use **destructuring with defaults** for default prop values
+
+---
 
 ## Development
 
@@ -259,6 +318,9 @@ src/
     commands/
       generate.ts             Generate + --check mode
       verify.ts               Verify stories are in sync
+      watch.ts                Watch mode (chokidar)
+      init.ts                 Windsurf Cascade skill scaffolding
+      update.ts               Self-update via git pull + rebuild
   detector/
     componentFinder.ts        Glob + heuristic filtering
     heuristics.ts             Component confidence scoring
@@ -274,7 +336,7 @@ src/
   utils/
     logger.ts                 Chalk-based logger
 tests/
-  fixtures/                   8 sample React components
+  fixtures/                   Sample React components
   typeMapper.test.ts          43 unit tests
   heuristics.test.ts          20 unit tests
   variantDetector.test.ts     20 unit tests
