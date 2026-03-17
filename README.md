@@ -16,8 +16,8 @@ storybook-gen generate
 Or clone and link locally for development:
 
 ```bash
-git clone https://github.com/nngu3010/storybook-gen.git
-cd storybook-gen
+git clone https://github.com/nngu3010/storybook-ai-generator.git
+cd storybook-ai-generator
 npm install && npm run build && npm link
 ```
 
