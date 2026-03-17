@@ -1,0 +1,44 @@
+{
+  "name": "storybook-gen",
+  "version": "0.1.0",
+  "description": "Auto-generate Storybook stories from React/TypeScript components",
+  "type": "module",
+  "bin": {
+    "storybook-gen": "./dist/cli/index.js"
+  },
+  "main": "./dist/cli/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "storybook",
+    "react",
+    "typescript",
+    "codegen",
+    "stories",
+    "cli"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "chokidar": "^3.6.0",
+    "commander": "^12.0.0",
+    "glob": "^11.0.0",
+    "handlebars": "^4.7.8",
+    "ts-morph": "^22.0.0"
+  },
+  "devDependencies": {
+    "@types/handlebars": "^4.1.0",
+    "@types/node": "^20.0.0",
+    "@types/react": "^19.2.14",
+    "typescript": "^5.4.0",
+    "vitest": "^1.4.0"
+  }
+}
