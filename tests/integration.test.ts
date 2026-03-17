@@ -112,7 +112,7 @@ describe('integration: parse and generate', () => {
     const content = buildStoryContent(meta, 'Button.tsx');
 
     // Must have checksum header
-    expect(content).toMatch(/\/\/ @storybook-gen checksum: [a-f0-9]+/);
+    expect(content).toMatch(/\/\/ @sbook-ai checksum: [a-f0-9]+/);
 
     // Must import from storybook
     expect(content).toContain("import type { Meta, StoryObj } from '@storybook/react'");
@@ -160,7 +160,7 @@ describe('integration: parse and generate', () => {
       // Every story must be parseable (has required structure)
       expect(content).toContain('export default meta');
       expect(content).toContain('export const Default: Story');
-      expect(content).toMatch(/\/\/ @storybook-gen checksum:/);
+      expect(content).toMatch(/\/\/ @sbook-ai checksum:/);
     }
   });
 });
@@ -182,7 +182,7 @@ describe('integration: story writer', () => {
   });
 
   it('writes a new story file when none exists', () => {
-    const content = '// @storybook-gen checksum: abc123 generated: 2026-01-01\nexport default {};';
+    const content = '// @sbook-ai checksum: abc123 generated: 2026-01-01\nexport default {};';
     const result = writeStory(path.join(tmpDir, 'Fake.tsx'), content);
 
     expect(result).toBe('written');
@@ -190,14 +190,14 @@ describe('integration: story writer', () => {
   });
 
   it('skips when checksum matches', () => {
-    const content = '// @storybook-gen checksum: abc123 generated: 2026-01-01\nexport default {};';
+    const content = '// @sbook-ai checksum: abc123 generated: 2026-01-01\nexport default {};';
     const result = writeStory(path.join(tmpDir, 'Fake.tsx'), content);
 
     expect(result).toBe('skipped');
   });
 
   it('creates .generated.ts on conflict', () => {
-    const newContent = '// @storybook-gen checksum: def456 generated: 2026-01-01\nexport default {};';
+    const newContent = '// @sbook-ai checksum: def456 generated: 2026-01-01\nexport default {};';
     const result = writeStory(path.join(tmpDir, 'Fake.tsx'), newContent);
 
     expect(result).toBe('conflict');
@@ -205,7 +205,7 @@ describe('integration: story writer', () => {
   });
 
   it('overwrites when --overwrite is set', () => {
-    const newContent = '// @storybook-gen checksum: ghi789 generated: 2026-01-01\noverwritten';
+    const newContent = '// @sbook-ai checksum: ghi789 generated: 2026-01-01\noverwritten';
     const result = writeStory(path.join(tmpDir, 'Fake.tsx'), newContent, { overwrite: true });
 
     expect(result).toBe('written');

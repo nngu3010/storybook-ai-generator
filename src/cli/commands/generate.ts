@@ -181,7 +181,7 @@ async function runCheckMode(
 function validateStoryContent(content: string, componentName: string): string[] {
   const errors: string[] = [];
 
-  if (!content.includes('// @storybook-gen checksum:')) {
+  if (!content.includes('// @sbook-ai checksum:')) {
     errors.push('Missing checksum header');
   }
   if (!content.includes("from '@storybook/react'")) {
@@ -231,7 +231,7 @@ async function typecheckInTempDir(
   componentFiles: string[],
   project: ReturnType<typeof buildProgram>,
 ): Promise<TypeErrorInfo[]> {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storybook-gen-check-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbook-ai-check-'));
 
   try {
     // Copy component files and generate stories in temp dir

@@ -57,10 +57,10 @@ export function writeStory(
 
 /**
  * Extracts the checksum from the header comment line:
- * `// @storybook-gen checksum: {hash} generated: {date}`
+ * `// @sbook-ai checksum: {hash} generated: {date}`
  */
 function extractChecksum(content: string): string | null {
-  const match = content.match(/\/\/ @storybook-gen checksum: ([a-f0-9]+)/);
+  const match = content.match(/\/\/ @sbook-ai checksum: ([a-f0-9]+)/);
   return match ? match[1] : null;
 }
 

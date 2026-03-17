@@ -1,4 +1,4 @@
-# storybook-gen
+# sbook-ai
 
 Auto-generate Storybook stories from React/TypeScript components. Detects components, infers props from TypeScript types, and outputs ready-to-run `.stories.ts` files in CSF3 format.
 
@@ -10,7 +10,7 @@ npm install -g storybook-ai-generator
 
 # Generate stories for any React project
 cd ~/your-react-project
-storybook-gen generate
+sbook-aigenerate
 ```
 
 Or clone and link locally for development:
@@ -28,26 +28,26 @@ All commands default to the current directory when no `<dir>` is given.
 ### `generate [dir]` — Generate stories
 
 ```bash
-storybook-gen generate                         # scan current directory
-storybook-gen generate ./src/components        # scan a specific directory
-storybook-gen generate --dry-run               # preview without writing files
-storybook-gen generate --overwrite             # force overwrite existing stories
-storybook-gen generate --check                 # CI-safe: validate without writing (exits 1 on failure)
+sbook-aigenerate                         # scan current directory
+sbook-aigenerate ./src/components        # scan a specific directory
+sbook-aigenerate --dry-run               # preview without writing files
+sbook-aigenerate --overwrite             # force overwrite existing stories
+sbook-aigenerate --check                 # CI-safe: validate without writing (exits 1 on failure)
 ```
 
 ### `verify [dir]` — Verify stories are in sync
 
 ```bash
-storybook-gen verify                           # check stories match current props
-storybook-gen verify --typecheck               # also typecheck with tsc
+sbook-aiverify                           # check stories match current props
+sbook-aiverify --typecheck               # also typecheck with tsc
 ```
 
 ### `watch [dir]` — Watch mode
 
 ```bash
-storybook-gen watch                            # watch current directory
-storybook-gen watch ./src/components           # watch a specific directory
-storybook-gen watch --overwrite                # overwrite stories on change
+sbook-aiwatch                            # watch current directory
+sbook-aiwatch ./src/components           # watch a specific directory
+sbook-aiwatch --overwrite                # overwrite stories on change
 ```
 
 Watch mode:
@@ -59,8 +59,8 @@ Watch mode:
 ### `init [dir]` — Add Windsurf Cascade skills
 
 ```bash
-storybook-gen init                             # scaffold skills in current project
-storybook-gen init --force                     # overwrite existing skill files
+sbook-aiinit                             # scaffold skills in current project
+sbook-aiinit --force                     # overwrite existing skill files
 ```
 
 Writes three [Windsurf Cascade](https://docs.windsurf.com/windsurf/cascade/skills) skills into `.windsurf/skills/`:
@@ -76,7 +76,7 @@ Cascade also auto-invokes these skills when your request matches their descripti
 ### `update` — Update the tool
 
 ```bash
-storybook-gen update
+sbook-aiupdate
 ```
 
 Pulls the latest changes from git and rebuilds. If the working directory has uncommitted changes, they are stashed and restored after the update. Falls back to a rebuild-only if no git remote is found.
@@ -89,13 +89,13 @@ Pulls the latest changes from git and rebuilds. If the working directory has unc
 
 ```bash
 # 1. Check first (writes nothing)
-storybook-gen generate --check
+sbook-aigenerate --check
 
 # 2. Generate (safe — never overwrites hand-edited files)
-storybook-gen generate
+sbook-aigenerate
 
 # 3. Verify after
-storybook-gen verify --typecheck
+sbook-aiverify --typecheck
 
 # 4. Build your app to make sure nothing broke
 npm run build
@@ -105,7 +105,7 @@ npm run build
 
 ```bash
 # 1. Generate stories
-storybook-gen generate
+sbook-aigenerate
 
 # 2. Install Storybook (if not already installed)
 npx storybook@latest init
@@ -118,20 +118,20 @@ npm run storybook
 
 ```bash
 # 1. Verify what's outdated
-storybook-gen verify
+sbook-aiverify
 
 # 2. Regenerate (safe — never overwrites hand-edited stories)
-storybook-gen generate
+sbook-aigenerate
 
 # 3. Verify everything is in sync
-storybook-gen verify --typecheck
+sbook-aiverify --typecheck
 ```
 
 ### Development (watch mode)
 
 ```bash
 # Keep stories in sync as you build components
-storybook-gen watch
+sbook-aiwatch
 ```
 
 ### CI pipeline
@@ -153,14 +153,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install storybook-gen
+      - name: Install sbook-ai
         run: npm install -g storybook-ai-generator
 
       - name: Check stories are valid and in sync
-        run: storybook-gen generate --check
+        run: sbook-aigenerate --check
 
       - name: Verify stories
-        run: storybook-gen verify --typecheck
+        run: sbook-aiverify --typecheck
 
       - name: Build Storybook
         run: npm run build-storybook
@@ -170,7 +170,7 @@ jobs:
 
 ```bash
 # .husky/pre-commit
-storybook-gen verify
+sbook-aiverify
 ```
 
 ---
@@ -223,7 +223,7 @@ String union props (like `variant: 'primary' | 'secondary' | 'danger'`) automati
 
 Every generated file has a checksum header:
 ```
-// @storybook-gen checksum: a49a938c05dd generated: 2026-03-17
+// @sbook-aichecksum: a49a938c05dd generated: 2026-03-17
 ```
 
 On re-run:
@@ -253,7 +253,7 @@ export default function Button({ label, variant = 'primary', disabled = false, o
 
 Generates `Button.stories.ts`:
 ```ts
-// @storybook-gen checksum: a49a938c05dd generated: 2026-03-17
+// @sbook-aichecksum: a49a938c05dd generated: 2026-03-17
 // AUTO-GENERATED — do not edit this file manually.
 
 import type { Meta, StoryObj } from '@storybook/react';
@@ -284,7 +284,7 @@ export const Danger:    Story = { args: { label: "", disabled: false, variant: '
 
 ## Component Requirements for Best Results
 
-storybook-gen works best when components:
+sbook-aiworks best when components:
 - Have a **default export** (function or arrow function)
 - Have **typed props** with a TypeScript interface or type
 - Use **JSDoc comments** on props for auto-generated descriptions

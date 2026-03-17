@@ -100,7 +100,7 @@ export async function runVerify(dir: string, opts: VerifyOptions = {}): Promise<
   if (hasIssues) {
     console.log('');
     if (result.missing > 0 || result.outdated > 0) {
-      logger.info('Run `storybook-gen generate <dir>` to fix missing/outdated stories.');
+      logger.info('Run `sbook-ai generate <dir>` to fix missing/outdated stories.');
     }
     return 1;
   }
@@ -111,7 +111,7 @@ export async function runVerify(dir: string, opts: VerifyOptions = {}): Promise<
 }
 
 function extractChecksum(content: string): string | null {
-  const match = content.match(/\/\/ @storybook-gen checksum: ([a-f0-9]+)/);
+  const match = content.match(/\/\/ @sbook-ai checksum: ([a-f0-9]+)/);
   return match ? match[1] : null;
 }
 

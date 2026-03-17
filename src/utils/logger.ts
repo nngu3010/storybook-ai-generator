@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 
-const PREFIX = '[storybook-gen]';
+const PREFIX = '[sbook-ai]';
 
 export const logger = {
   info(message: string): void {

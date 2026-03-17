@@ -4,7 +4,7 @@
   "description": "Auto-generate Storybook stories from React/TypeScript components",
   "type": "module",
   "bin": {
-    "storybook-gen": "./dist/cli/index.js"
+    "sbook-ai": "./dist/cli/index.js"
   },
   "main": "./dist/cli/index.js",
   "files": [

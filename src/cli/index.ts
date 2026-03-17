@@ -9,9 +9,9 @@ import { runUpdate } from './commands/update.js';
 const program = new Command();
 
 program
-  .name('storybook-gen')
+  .name('sbook-ai')
   .description('Auto-generate Storybook stories from React/TypeScript components')
-  .version('0.1.0');
+  .version('0.1.1');
 
 program
   .command('generate [dir]')
@@ -50,7 +50,7 @@ program
 
 program
   .command('update')
-  .description('Pull latest changes and rebuild storybook-gen')
+  .description('Pull latest changes and rebuild sbook-ai')
   .action(async () => {
     await runUpdate();
   });

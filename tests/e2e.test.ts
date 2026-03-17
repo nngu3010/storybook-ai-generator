@@ -65,7 +65,7 @@ describe('e2e: full generate pipeline', () => {
       const content = fs.readFileSync(storyPath, 'utf-8');
 
       // Checksum header
-      expect(content).toMatch(/\/\/ @storybook-gen checksum: [a-f0-9]{12}/);
+      expect(content).toMatch(/\/\/ @sbook-ai checksum: [a-f0-9]{12}/);
 
       // Required imports
       expect(content).toContain("from '@storybook/react'");
