@@ -2,18 +2,56 @@
 
 Auto-generate Storybook stories from React/TypeScript components. Detects components, infers props from TypeScript types, and outputs ready-to-run `.stories.ts` files in CSF3 format.
 
-## Quick Start
+## Installation
+
+### Global (use anywhere)
 
 ```bash
-# Install globally from npm
 npm install -g storybook-ai-generator
-
-# Generate stories for any React project
-cd ~/your-react-project
-sbook-aigenerate
+sbook-ai generate
 ```
 
-Or clone and link locally for development:
+### Local (recommended for teams)
+
+Install as a dev dependency so everyone on the team uses the same version:
+
+```bash
+npm install --save-dev storybook-ai-generator
+```
+
+Run via npx:
+
+```bash
+npx sbook-ai generate
+```
+
+Or add scripts to your `package.json` for convenience:
+
+```json
+"scripts": {
+  "stories:generate": "sbook-ai generate ./src/components",
+  "stories:verify":  "sbook-ai verify ./src/components",
+  "stories:watch":   "sbook-ai watch ./src/components"
+}
+```
+
+Then run:
+
+```bash
+npm run stories:generate
+npm run stories:verify
+npm run stories:watch
+```
+
+> **Local vs Global**
+> | | Global | Local (devDependency) |
+> |---|---|---|
+> | Install | `npm i -g storybook-ai-generator` | `npm i -D storybook-ai-generator` |
+> | Run | `sbook-ai generate` | `npx sbook-ai generate` |
+> | Version pinned per project | No | Yes |
+> | Works in CI without extra install step | No | Yes (`npm ci` is enough) |
+
+### Development (clone & link)
 
 ```bash
 git clone https://github.com/nngu3010/storybook-ai-generator.git
@@ -28,26 +66,26 @@ All commands default to the current directory when no `<dir>` is given.
 ### `generate [dir]` — Generate stories
 
 ```bash
-sbook-aigenerate                         # scan current directory
-sbook-aigenerate ./src/components        # scan a specific directory
-sbook-aigenerate --dry-run               # preview without writing files
-sbook-aigenerate --overwrite             # force overwrite existing stories
-sbook-aigenerate --check                 # CI-safe: validate without writing (exits 1 on failure)
+sbook-ai generate                         # scan current directory
+sbook-ai generate ./src/components        # scan a specific directory
+sbook-ai generate --dry-run               # preview without writing files
+sbook-ai generate --overwrite             # force overwrite existing stories
+sbook-ai generate --check                 # CI-safe: validate without writing (exits 1 on failure)
 ```
 
 ### `verify [dir]` — Verify stories are in sync
 
 ```bash
-sbook-aiverify                           # check stories match current props
-sbook-aiverify --typecheck               # also typecheck with tsc
+sbook-ai verify                           # check stories match current props
+sbook-ai verify --typecheck               # also typecheck with tsc
 ```
 
 ### `watch [dir]` — Watch mode
 
 ```bash
-sbook-aiwatch                            # watch current directory
-sbook-aiwatch ./src/components           # watch a specific directory
-sbook-aiwatch --overwrite                # overwrite stories on change
+sbook-ai watch                            # watch current directory
+sbook-ai watch ./src/components           # watch a specific directory
+sbook-ai watch --overwrite                # overwrite stories on change
 ```
 
 Watch mode:
@@ -59,8 +97,8 @@ Watch mode:
 ### `init [dir]` — Add Windsurf Cascade skills
 
 ```bash
-sbook-aiinit                             # scaffold skills in current project
-sbook-aiinit --force                     # overwrite existing skill files
+sbook-ai init                             # scaffold skills in current project
+sbook-ai init --force                     # overwrite existing skill files
 ```
 
 Writes three [Windsurf Cascade](https://docs.windsurf.com/windsurf/cascade/skills) skills into `.windsurf/skills/`:
@@ -76,7 +114,7 @@ Cascade also auto-invokes these skills when your request matches their descripti
 ### `update` — Update the tool
 
 ```bash
-sbook-aiupdate
+sbook-ai update
 ```
 
 Pulls the latest changes from git and rebuilds. If the working directory has uncommitted changes, they are stashed and restored after the update. Falls back to a rebuild-only if no git remote is found.
@@ -89,13 +127,13 @@ Pulls the latest changes from git and rebuilds. If the working directory has unc
 
 ```bash
 # 1. Check first (writes nothing)
-sbook-aigenerate --check
+sbook-ai generate --check
 
 # 2. Generate (safe — never overwrites hand-edited files)
-sbook-aigenerate
+sbook-ai generate
 
 # 3. Verify after
-sbook-aiverify --typecheck
+sbook-ai verify --typecheck
 
 # 4. Build your app to make sure nothing broke
 npm run build
@@ -105,7 +143,7 @@ npm run build
 
 ```bash
 # 1. Generate stories
-sbook-aigenerate
+sbook-ai generate
 
 # 2. Install Storybook (if not already installed)
 npx storybook@latest init
@@ -118,20 +156,20 @@ npm run storybook
 
 ```bash
 # 1. Verify what's outdated
-sbook-aiverify
+sbook-ai verify
 
 # 2. Regenerate (safe — never overwrites hand-edited stories)
-sbook-aigenerate
+sbook-ai generate
 
 # 3. Verify everything is in sync
-sbook-aiverify --typecheck
+sbook-ai verify --typecheck
 ```
 
 ### Development (watch mode)
 
 ```bash
 # Keep stories in sync as you build components
-sbook-aiwatch
+sbook-ai watch
 ```
 
 ### CI pipeline
@@ -151,16 +189,13 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        run: npm ci
-
-      - name: Install sbook-ai
-        run: npm install -g storybook-ai-generator
+        run: npm ci  # sbook-ai is a devDependency — no extra install needed
 
       - name: Check stories are valid and in sync
-        run: sbook-aigenerate --check
+        run: npx sbook-ai generate --check
 
       - name: Verify stories
-        run: sbook-aiverify --typecheck
+        run: npx sbook-ai verify --typecheck
 
       - name: Build Storybook
         run: npm run build-storybook
@@ -170,7 +205,7 @@ jobs:
 
 ```bash
 # .husky/pre-commit
-sbook-aiverify
+sbook-ai verify
 ```
 
 ---
@@ -223,7 +258,7 @@ String union props (like `variant: 'primary' | 'secondary' | 'danger'`) automati
 
 Every generated file has a checksum header:
 ```
-// @sbook-aichecksum: a49a938c05dd generated: 2026-03-17
+// @sbook-ai checksum: a49a938c05dd generated: 2026-03-17
 ```
 
 On re-run:
@@ -253,7 +288,7 @@ export default function Button({ label, variant = 'primary', disabled = false, o
 
 Generates `Button.stories.ts`:
 ```ts
-// @sbook-aichecksum: a49a938c05dd generated: 2026-03-17
+// @sbook-ai checksum: a49a938c05dd generated: 2026-03-17
 // AUTO-GENERATED — do not edit this file manually.
 
 import type { Meta, StoryObj } from '@storybook/react';
@@ -284,7 +319,7 @@ export const Danger:    Story = { args: { label: "", disabled: false, variant: '
 
 ## Component Requirements for Best Results
 
-sbook-aiworks best when components:
+sbook-ai works best when components:
 - Have a **default export** (function or arrow function)
 - Have **typed props** with a TypeScript interface or type
 - Use **JSDoc comments** on props for auto-generated descriptions
