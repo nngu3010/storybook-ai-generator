@@ -5,17 +5,20 @@ Auto-generate Storybook stories from React/TypeScript components. Detects compon
 ## Quick Start
 
 ```bash
-# Clone and install
-git clone https://github.com/nngu3010/storybook-gen.git
-cd storybook-gen
-npm install && npm run build
-
-# Link globally (one time)
-npm link
+# Install globally from npm
+npm install -g storybook-autogen
 
 # Generate stories for any React project
 cd ~/your-react-project
 storybook-gen generate
+```
+
+Or clone and link locally for development:
+
+```bash
+git clone https://github.com/nngu3010/storybook-gen.git
+cd storybook-gen
+npm install && npm run build && npm link
 ```
 
 ## Commands

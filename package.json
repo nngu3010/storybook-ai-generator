@@ -1,5 +1,5 @@
 {
-  "name": "storybook-gen",
+  "name": "storybook-autogen",
   "version": "0.1.0",
   "description": "Auto-generate Storybook stories from React/TypeScript components",
   "type": "module",
