@@ -6,7 +6,7 @@ Auto-generate Storybook stories from React/TypeScript components. Detects compon
 
 ```bash
 # Install globally from npm
-npm install -g storybook-autogen
+npm install -g storybook-ai-generator
 
 # Generate stories for any React project
 cd ~/your-react-project
@@ -154,7 +154,7 @@ jobs:
         run: npm ci
 
       - name: Install storybook-gen
-        run: npm install -g storybook-gen
+        run: npm install -g storybook-ai-generator
 
       - name: Check stories are valid and in sync
         run: storybook-gen generate --check
