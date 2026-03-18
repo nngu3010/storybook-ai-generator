@@ -8,6 +8,7 @@ import { parseComponent } from '../../parser/componentParser.js';
 import { buildStoryContent } from '../../generator/storyBuilder.js';
 import { writeStory } from '../../generator/storyWriter.js';
 import { logger } from '../../utils/logger.js';
+import { type TypeErrorInfo, findTsconfig, parseTscOutput } from '../../utils/typecheck.js';
 
 export interface GenerateOptions {
   overwrite?: boolean;
@@ -221,11 +222,6 @@ function validateStoryContent(content: string, componentName: string): string[] 
   return errors;
 }
 
-interface TypeErrorInfo {
-  file: string;
-  message: string;
-}
-
 async function typecheckInTempDir(
   dir: string,
   componentFiles: string[],
@@ -245,22 +241,6 @@ async function typecheckInTempDir(
       const content = buildStoryContent(meta, baseName);
       const storyName = baseName.replace(/\.(tsx?|jsx?)$/, '.stories.ts');
       fs.writeFileSync(path.join(tmpDir, storyName), content);
-    }
-
-    // Write tsconfig for the temp dir
-    // Look for project's tsconfig to inherit from
-    const tsconfigCandidates = [
-      path.join(dir, 'tsconfig.json'),
-      path.join(dir, '..', 'tsconfig.json'),
-      path.join(dir, '..', '..', 'tsconfig.json'),
-    ];
-
-    let projectTsconfig: string | undefined;
-    for (const candidate of tsconfigCandidates) {
-      if (fs.existsSync(candidate)) {
-        projectTsconfig = path.resolve(candidate);
-        break;
-      }
     }
 
     // Find node_modules for type resolution
@@ -320,24 +300,8 @@ async function typecheckInTempDir(
     return [];
   } catch (err: any) {
     const output = (err.stdout?.toString() ?? '') + (err.stderr?.toString() ?? '');
-    const errors: TypeErrorInfo[] = [];
-    const lines = output.split('\n');
-
-    for (const line of lines) {
-      const match = line.match(/([^\s]+\.stories\.ts)\((\d+),(\d+)\):\s*error\s+(TS\d+):\s*(.+)/);
-      if (match) {
-        errors.push({
-          file: match[1],
-          message: `${match[4]}: ${match[5]} (line ${match[2]})`,
-        });
-      }
-    }
-
+    const errors = parseTscOutput(output);
     // If no story-specific errors but tsc failed, the error is in component files (not our fault)
-    if (errors.length === 0) {
-      return [];
-    }
-
     return errors;
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

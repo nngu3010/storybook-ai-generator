@@ -5,13 +5,17 @@ import { runVerify } from './commands/verify.js';
 import { runInit } from './commands/init.js';
 import { runWatch } from './commands/watch.js';
 import { runUpdate } from './commands/update.js';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const { version } = require('../../package.json') as { version: string };
 
 const program = new Command();
 
 program
   .name('sbook-ai')
   .description('Auto-generate Storybook stories from React/TypeScript components')
-  .version('0.1.1');
+  .version(version);
 
 program
   .command('generate [dir]')

@@ -6,6 +6,7 @@ import { buildProgram } from '../../parser/programBuilder.js';
 import { parseComponent } from '../../parser/componentParser.js';
 import { buildStoryContent } from '../../generator/storyBuilder.js';
 import { logger } from '../../utils/logger.js';
+import { type TypeErrorInfo, findTsconfig, parseTscOutput } from '../../utils/typecheck.js';
 
 export interface VerifyOptions {
   typecheck?: boolean;
@@ -77,7 +78,7 @@ export async function runVerify(dir: string, opts: VerifyOptions = {}): Promise<
   if (opts.typecheck) {
     logger.info('');
     logger.info('Running TypeScript validation on generated stories...');
-    const typeErrors = await typecheckStories(resolvedDir, componentFiles, project);
+    const typeErrors = await typecheckStories(resolvedDir, componentFiles);
     result.typeErrors = typeErrors.length;
 
     for (const err of typeErrors) {
@@ -115,12 +116,7 @@ function extractChecksum(content: string): string | null {
   return match ? match[1] : null;
 }
 
-interface TypeErrorInfo {
-  file: string;
-  message: string;
-}
-
-async function typecheckStories(dir: string, componentFiles: string[], project: ReturnType<typeof buildProgram>): Promise<TypeErrorInfo[]> {
+async function typecheckStories(dir: string, componentFiles: string[]): Promise<TypeErrorInfo[]> {
   // Find all .stories.ts files in the directory
   const storyFiles: string[] = [];
   for (const filePath of componentFiles) {
@@ -133,21 +129,7 @@ async function typecheckStories(dir: string, componentFiles: string[], project: 
 
   if (storyFiles.length === 0) return [];
 
-  // Look for tsconfig in the project
-  const tsconfigCandidates = [
-    path.join(dir, 'tsconfig.json'),
-    path.join(dir, '..', 'tsconfig.json'),
-    path.join(dir, '..', '..', 'tsconfig.json'),
-  ];
-
-  let tsconfigPath: string | undefined;
-  for (const candidate of tsconfigCandidates) {
-    if (fs.existsSync(candidate)) {
-      tsconfigPath = candidate;
-      break;
-    }
-  }
-
+  const tsconfigPath = findTsconfig(dir);
   if (!tsconfigPath) {
     logger.warn('No tsconfig.json found — skipping TypeScript validation');
     return [];
@@ -162,21 +144,6 @@ async function typecheckStories(dir: string, componentFiles: string[], project: 
     return [];
   } catch (err: any) {
     const output = (err.stdout?.toString() ?? '') + (err.stderr?.toString() ?? '');
-    const errors: TypeErrorInfo[] = [];
-
-    // Parse tsc output for story file errors only
-    const lines = output.split('\n');
-    for (const line of lines) {
-      // Match lines like: src/components/Button.stories.ts(5,10): error TS2307: ...
-      const match = line.match(/([^\s]+\.stories\.ts)\((\d+),(\d+)\):\s*error\s+(TS\d+):\s*(.+)/);
-      if (match) {
-        errors.push({
-          file: path.basename(match[1]),
-          message: `${match[4]}: ${match[5]} (line ${match[2]})`,
-        });
-      }
-    }
-
-    return errors;
+    return parseTscOutput(output);
   }
 }
