@@ -32,7 +32,7 @@ export function mapPropToArgType(prop: PropMeta): ArgTypeMeta {
 /**
  * Returns a sensible default arg value based on the prop type.
  */
-export function getDefaultArg(prop: PropMeta): string | number | boolean | undefined {
+export function getDefaultArg(prop: PropMeta): unknown {
   if (prop.defaultValue !== undefined) {
     // ts-morph returns default values with quotes for strings, e.g. "'primary'" → strip them
     const stripped = stripStringQuotes(prop.defaultValue);
@@ -43,6 +43,10 @@ export function getDefaultArg(prop: PropMeta): string | number | boolean | undef
     // Boolean default
     if (prop.defaultValue === 'true') return true;
     if (prop.defaultValue === 'false') return false;
+    // Array/object literal defaults — parse to avoid double-stringification
+    if (prop.defaultValue === '[]' || prop.defaultValue === '{}') {
+      try { return JSON.parse(prop.defaultValue); } catch { /* fall through */ }
+    }
     return prop.defaultValue;
   }
 
@@ -55,6 +59,9 @@ export function getDefaultArg(prop: PropMeta): string | number | boolean | undef
   // String literal union — return the first option
   const literals = extractStringLiterals(clean);
   if (literals.length > 0) return literals[0];
+
+  // Array types — return empty array
+  if (/\[\]$/.test(clean) || /^Array</.test(clean)) return [];
 
   return undefined;
 }
