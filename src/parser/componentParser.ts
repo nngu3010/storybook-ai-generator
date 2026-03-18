@@ -11,6 +11,7 @@ import {
   FunctionExpression,
   ParameterDeclaration,
   JSDocableNode,
+  CallExpression,
 } from 'ts-morph';
 
 export interface PropMeta {
@@ -108,6 +109,11 @@ function findDefaultExport(sourceFile: SourceFile): FunctionLike | null {
         const referenced = resolveIdentifier(expr, sourceFile);
         if (referenced) return referenced;
       }
+      // React.forwardRef(...) or React.memo(...)
+      if (Node.isCallExpression(expr)) {
+        const unwrapped = unwrapWrappers(expr, sourceFile);
+        if (unwrapped) return unwrapped;
+      }
     }
   }
 
@@ -115,19 +121,24 @@ function findDefaultExport(sourceFile: SourceFile): FunctionLike | null {
   for (const varDecl of sourceFile.getVariableDeclarations()) {
     const init = varDecl.getInitializer();
     if (!init) continue;
-    if (Node.isArrowFunction(init) || Node.isFunctionExpression(init)) {
-      // Check if the name is the default export
+
+    const isDefaultExport = (() => {
       const name = varDecl.getName();
-      const sym = sourceFile.getLocal(name);
-      if (sym) {
-        const exported = sourceFile.getDefaultExportSymbol();
-        if (exported) {
-          const exportedName = exported.getName();
-          if (exportedName === name || exportedName === 'default') {
-            return init as ArrowFunction | FunctionExpression;
-          }
-        }
-      }
+      const exported = sourceFile.getDefaultExportSymbol();
+      if (!exported) return false;
+      const exportedName = exported.getName();
+      return exportedName === name || exportedName === 'default';
+    })();
+
+    if (!isDefaultExport) continue;
+
+    if (Node.isArrowFunction(init) || Node.isFunctionExpression(init)) {
+      return init as ArrowFunction | FunctionExpression;
+    }
+    // const Foo = React.forwardRef(...) or React.memo(...)
+    if (Node.isCallExpression(init)) {
+      const unwrapped = unwrapWrappers(init, sourceFile);
+      if (unwrapped) return unwrapped;
     }
   }
 
@@ -142,14 +153,61 @@ function resolveIdentifier(
   for (const varDecl of sourceFile.getVariableDeclarations()) {
     if (varDecl.getName() === name) {
       const init = varDecl.getInitializer();
-      if (init && (Node.isArrowFunction(init) || Node.isFunctionExpression(init))) {
+      if (!init) continue;
+      if (Node.isArrowFunction(init) || Node.isFunctionExpression(init)) {
         return init as ArrowFunction | FunctionExpression;
+      }
+      if (Node.isCallExpression(init)) {
+        const unwrapped = unwrapWrappers(init, sourceFile);
+        if (unwrapped) return unwrapped;
       }
     }
   }
   for (const fn of sourceFile.getFunctions()) {
     if (fn.getName() === name) return fn;
   }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// forwardRef / memo unwrapping
+// ---------------------------------------------------------------------------
+
+/**
+ * Unwraps React.forwardRef(...) and React.memo(...) call expressions,
+ * recursively handling combinations like React.memo(React.forwardRef(...)).
+ */
+function unwrapWrappers(call: CallExpression, sourceFile: SourceFile): FunctionLike | null {
+  const calleeText = call.getExpression().getText();
+
+  if (/^(React\.)?forwardRef$/.test(calleeText)) {
+    const args = call.getArguments();
+    if (args.length === 0) return null;
+    const renderFn = args[0];
+    if (Node.isArrowFunction(renderFn) || Node.isFunctionExpression(renderFn)) {
+      return renderFn as ArrowFunction | FunctionExpression;
+    }
+    if (Node.isIdentifier(renderFn)) {
+      return resolveIdentifier(renderFn, sourceFile);
+    }
+  }
+
+  if (/^(React\.)?memo$/.test(calleeText)) {
+    const args = call.getArguments();
+    if (args.length === 0) return null;
+    const component = args[0];
+    if (Node.isArrowFunction(component) || Node.isFunctionExpression(component)) {
+      return component as ArrowFunction | FunctionExpression;
+    }
+    if (Node.isIdentifier(component)) {
+      return resolveIdentifier(component, sourceFile);
+    }
+    // memo(forwardRef(...))
+    if (Node.isCallExpression(component)) {
+      return unwrapWrappers(component, sourceFile);
+    }
+  }
+
   return null;
 }
 
@@ -258,6 +316,38 @@ function unwrapReactFc(type: Type): Type {
   return type;
 }
 
+/**
+ * Expands type aliases whose underlying type is a union of string/number/boolean
+ * literals (e.g. `type Variant = 'a' | 'b'` → `"a" | "b"`).
+ * Falls back to the default getText() representation for everything else.
+ */
+/**
+ * Expands type aliases whose underlying type is a union of string/number literals
+ * (e.g. `type Variant = 'a' | 'b'` → `"a" | "b"`).
+ * Skips pure boolean aliases (`true | false`) since `boolean` is already handled
+ * by the type mapper and expanding it would break the `control: 'boolean'` path.
+ * Falls back to the default getText() representation for everything else.
+ */
+function expandTypeAlias(type: Type, sourceFile: SourceFile): string {
+  // Strip optional wrapper (undefined) to check the base type
+  const baseType = type.getNonNullableType();
+  if (baseType.isUnion()) {
+    const members = baseType.getUnionTypes();
+    // Skip pure boolean unions (true | false) — let the mapper handle 'boolean'
+    const nonBool = members.filter((t) => !t.isBooleanLiteral());
+    if (nonBool.length === 0) return type.getText(sourceFile);
+
+    const isAllLiterals = members.every(
+      (t) => t.isStringLiteral() || t.isNumberLiteral() || t.isBooleanLiteral() || t.isUndefined() || t.isNull()
+    );
+    if (isAllLiterals) {
+      // Re-use the full type (including undefined for optional) for the text
+      return type.getUnionTypes().map((t) => t.getText(sourceFile)).join(' | ');
+    }
+  }
+  return type.getText(sourceFile);
+}
+
 function symbolToPropMeta(
   sym: MorphSymbol,
   sourceFile: SourceFile,
@@ -273,7 +363,7 @@ function symbolToPropMeta(
 
   // Determine type
   const type = sym.getTypeAtLocation(firstDecl ?? sourceFile);
-  const typeName = type.getText(sourceFile);
+  const typeName = expandTypeAlias(type, sourceFile);
 
   // Required: not optional and no default
   const isOptional = sym.isOptional();
@@ -351,10 +441,23 @@ function resolveComponentName(fn: FunctionLike, filePath: string): string {
   if (Node.isFunctionDeclaration(fn)) {
     return fn.getName() ?? fileBaseName(filePath);
   }
-  // Arrow or function expression — look at the variable name
-  const parent = fn.getParent();
-  if (parent && Node.isVariableDeclaration(parent)) {
-    return parent.getName();
+  // Arrow or function expression — walk up to find variable name.
+  // Handles: const Foo = () => ...
+  //          const Foo = React.forwardRef((props, ref) => ...)
+  //          const Foo = React.memo(React.forwardRef(...))
+  let node: Node = fn;
+  while (node) {
+    const parent = node.getParent();
+    if (!parent) break;
+    if (Node.isVariableDeclaration(parent)) {
+      return parent.getName();
+    }
+    // Keep walking up through CallExpression wrappers
+    if (Node.isCallExpression(parent)) {
+      node = parent;
+      continue;
+    }
+    break;
   }
   return fileBaseName(filePath);
 }
