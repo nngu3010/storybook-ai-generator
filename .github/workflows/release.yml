@@ -10,12 +10,13 @@ jobs:
     name: Release & Publish to npm
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # needed to create GitHub releases
+      contents: write  # needed to create GitHub releases and push version bump
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-node@v4
         with:
@@ -31,21 +32,26 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Get version from package.json
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Auto-bump patch version if tag already exists
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            npm version patch --no-git-tag-version
+            git add package.json package-lock.json
+            git commit -m "chore: auto-bump version to v$(node -p "require('./package.json').version")"
+            git push
+          fi
+
+      - name: Get version
         id: pkg
         run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
-      - name: Check if tag already exists
-        id: tag_check
-        run: |
-          if git rev-parse "v${{ steps.pkg.outputs.version }}" >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Create GitHub Release
-        if: steps.tag_check.outputs.exists == 'false'
+      - name: Create GitHub Release with release notes
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.pkg.outputs.version }}
@@ -53,7 +59,6 @@ jobs:
           generate_release_notes: true
 
       - name: Publish to npm
-        if: steps.tag_check.outputs.exists == 'false'
         run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
