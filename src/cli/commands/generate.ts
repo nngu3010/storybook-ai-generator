@@ -9,11 +9,14 @@ import { buildStoryContent } from '../../generator/storyBuilder.js';
 import { writeStory } from '../../generator/storyWriter.js';
 import { logger } from '../../utils/logger.js';
 import { type TypeErrorInfo, findTsconfig, parseTscOutput } from '../../utils/typecheck.js';
+import { generateAiArgs, createAiClient } from '../../ai/argGenerator.js';
+import type Anthropic from '@anthropic-ai/sdk';
 
 export interface GenerateOptions {
   overwrite?: boolean;
   dryRun?: boolean;
   check?: boolean;
+  ai?: boolean;
 }
 
 export async function runGenerate(dir: string, opts: GenerateOptions = {}): Promise<void> {
@@ -42,6 +45,17 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
     return;
   }
 
+  // Initialize AI client if --ai flag is set
+  let aiClient: Anthropic | undefined;
+  if (opts.ai) {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      logger.error('--ai requires ANTHROPIC_API_KEY environment variable to be set');
+      process.exit(1);
+    }
+    aiClient = createAiClient();
+    logger.info('AI mode enabled — generating realistic arg values with Claude');
+  }
+
   // Step 3: Parse → Map → Generate → Write each component
   for (const filePath of componentFiles) {
     try {
@@ -54,7 +68,15 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
       }
 
       const relativePath = path.relative(path.dirname(filePath), filePath);
-      const content = buildStoryContent(meta, relativePath);
+
+      // Generate AI args if enabled
+      let aiArgs;
+      if (aiClient && meta.props.length > 0) {
+        logger.info(`Generating AI args for ${meta.name}...`);
+        aiArgs = await generateAiArgs(meta, aiClient);
+      }
+
+      const content = buildStoryContent(meta, relativePath, { aiArgs });
 
       if (opts.dryRun) {
         logger.info(`[dry-run] Would write story for ${meta.name}`);

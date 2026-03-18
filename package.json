@@ -30,6 +30,7 @@
     "registry": "https://registry.npmjs.org"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.79.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "chalk": "^5.3.0",
     "chokidar": "^3.6.0",
@@ -39,10 +40,10 @@
     "ts-morph": "^22.0.0"
   },
   "optionalDependencies": {
-    "@rollup/rollup-linux-x64-gnu": "4.59.0",
-    "@rollup/rollup-linux-x64-musl": "4.59.0",
     "@rollup/rollup-darwin-arm64": "4.59.0",
     "@rollup/rollup-darwin-x64": "4.59.0",
+    "@rollup/rollup-linux-x64-gnu": "4.59.0",
+    "@rollup/rollup-linux-x64-musl": "4.59.0",
     "@rollup/rollup-win32-x64-msvc": "4.59.0"
   },
   "devDependencies": {

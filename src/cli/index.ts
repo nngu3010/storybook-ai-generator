@@ -24,7 +24,8 @@ program
   .option('--overwrite', 'Overwrite existing story files', false)
   .option('--dry-run', 'Preview what would be generated without writing files', false)
   .option('--check', 'Generate and verify stories without writing (CI-safe)', false)
-  .action(async (dir: string | undefined, opts: { overwrite: boolean; dryRun: boolean; check: boolean }) => {
+  .option('--ai', 'Use Claude AI to generate realistic, semantic arg values', false)
+  .action(async (dir: string | undefined, opts: { overwrite: boolean; dryRun: boolean; check: boolean; ai: boolean }) => {
     await runGenerate(dir ?? '.', opts);
   });
 
