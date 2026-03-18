@@ -341,11 +341,25 @@ function expandTypeAlias(type: Type, sourceFile: SourceFile): string {
       (t) => t.isStringLiteral() || t.isNumberLiteral() || t.isBooleanLiteral() || t.isUndefined() || t.isNull()
     );
     if (isAllLiterals) {
-      // Re-use the full type (including undefined for optional) for the text
-      return type.getUnionTypes().map((t) => t.getText(sourceFile)).join(' | ');
+      return type.getUnionTypes().map((t) => literalText(t, sourceFile)).join(' | ');
     }
   }
+
   return type.getText(sourceFile);
+}
+
+/**
+ * Returns the text representation of a literal type member.
+ * For enum literals, uses getLiteralValue() to get the actual value
+ * (e.g. "active" instead of "Status.Active").
+ */
+function literalText(t: Type, sourceFile: SourceFile): string {
+  if (t.isEnumLiteral()) {
+    const val = t.getLiteralValue();
+    if (typeof val === 'string') return `"${val}"`;
+    if (typeof val === 'number') return String(val);
+  }
+  return t.getText(sourceFile);
 }
 
 function symbolToPropMeta(

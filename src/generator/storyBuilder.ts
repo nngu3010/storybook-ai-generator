@@ -3,18 +3,28 @@ import path from 'path';
 import type { ComponentMeta } from '../parser/componentParser.js';
 import { mapPropToArgType, getDefaultArg, type ArgTypeMeta } from '../mapper/typeMapper.js';
 import { detectVariantProp, generateVariantStories } from '../mapper/variantDetector.js';
+import type { AiStoryArgs } from '../ai/argGenerator.js';
+
+export interface BuildStoryOptions {
+  /** AI-generated args to use instead of defaults */
+  aiArgs?: AiStoryArgs;
+}
 
 /**
  * Generates a complete CSF3 .stories.ts file as a string.
  */
-export function buildStoryContent(meta: ComponentMeta, relativePath: string): string {
+export function buildStoryContent(
+  meta: ComponentMeta,
+  relativePath: string,
+  options: BuildStoryOptions = {},
+): string {
   const date = new Date().toISOString().split('T')[0];
   const checksum = computeChecksum(meta);
 
   const importPath = buildImportPath(relativePath);
   const title = buildTitle(meta.filePath);
   const argTypes = buildArgTypes(meta);
-  const defaultArgs = buildDefaultArgs(meta);
+  const defaultArgs = options.aiArgs?.Default ?? buildDefaultArgs(meta);
 
   const variantProp = detectVariantProp(meta.props);
   const variantStories = variantProp ? generateVariantStories(variantProp) : [];
@@ -65,15 +75,27 @@ export function buildStoryContent(meta: ComponentMeta, relativePath: string): st
 
   // Variant stories
   for (const variant of variantStories) {
+    const variantName = sanitiseIdentifier(variant.name);
+    const aiVariantArgs = options.aiArgs?.variants?.[variant.name];
+
     lines.push(``);
-    lines.push(`export const ${sanitiseIdentifier(variant.name)}: Story = {`);
+    lines.push(`export const ${variantName}: Story = {`);
     lines.push(`  args: {`);
-    // Spread default args, excluding the variant prop (it gets its own value below)
-    for (const [k, v] of Object.entries(defaultArgs)) {
-      if (k === variantProp!.name) continue;
-      lines.push(`    ${k}: ${JSON.stringify(v)},`);
+
+    if (aiVariantArgs) {
+      // Use AI-generated args for this variant
+      for (const [k, v] of Object.entries(aiVariantArgs)) {
+        lines.push(`    ${k}: ${JSON.stringify(v)},`);
+      }
+    } else {
+      // Fallback: spread default args with variant value
+      for (const [k, v] of Object.entries(defaultArgs)) {
+        if (k === variantProp!.name) continue;
+        lines.push(`    ${k}: ${JSON.stringify(v)},`);
+      }
+      lines.push(`    ${variantProp!.name}: '${variant.value}',`);
     }
-    lines.push(`    ${variantProp!.name}: '${variant.value}',`);
+
     lines.push(`  },`);
     lines.push(`};`);
   }
