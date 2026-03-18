@@ -22,11 +22,8 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org
 
-      - name: Use public npm registry
-        run: npm config set registry https://registry.npmjs.org
-
       - name: Install dependencies
-        run: rm -rf node_modules package-lock.json && npm install
+        run: npm ci
 
       - name: Run tests
         run: npm run test:run
