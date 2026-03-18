@@ -111,6 +111,38 @@ Writes three [Windsurf Cascade](https://docs.windsurf.com/windsurf/cascade/skill
 
 Cascade also auto-invokes these skills when your request matches their description.
 
+### `serve` — MCP server mode
+
+```bash
+sbook-ai serve
+```
+
+Starts an MCP (Model Context Protocol) server over stdio, exposing component metadata and story generation to AI agents (Claude, Cursor, Copilot, etc.).
+
+**Tools exposed:**
+
+| Tool | Description |
+|---|---|
+| `list_components` | Discover all components in a directory with prop summaries |
+| `get_component` | Full prop schema — types, required, defaults, JSDoc descriptions |
+| `get_story` | Generated CSF3 story content for any component |
+| `check_stories` | Sync status (in-sync / outdated / missing) per component |
+
+**Connect to Claude Desktop or Cursor:**
+
+```json
+{
+  "mcpServers": {
+    "sbook-ai": {
+      "command": "sbook-ai",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+---
+
 ### `update` — Update the tool
 
 ```bash
@@ -332,7 +364,7 @@ sbook-ai works best when components:
 
 ```bash
 npm test           # watch mode
-npm run test:run   # single run (104 tests)
+npm run test:run   # single run (116 tests)
 npm run build      # compile TypeScript
 npm run dev        # build in watch mode
 ```
@@ -346,6 +378,7 @@ npm run dev        # build in watch mode
 | `variantDetector.test.ts` | 20 | Variant prop priority and story generation |
 | `integration.test.ts` | 15 | Full pipeline: detect→parse→generate→write |
 | `e2e.test.ts` | 6 | End-to-end generation + TypeScript validation |
+| `mcp.test.ts` | 12 | MCP server tools: list, get, story, check |
 
 ## Project Structure
 
@@ -359,6 +392,7 @@ src/
       watch.ts                Watch mode (chokidar)
       init.ts                 Windsurf Cascade skill scaffolding
       update.ts               Self-update via git pull + rebuild
+      serve.ts                MCP server command
   detector/
     componentFinder.ts        Glob + heuristic filtering
     heuristics.ts             Component confidence scoring
@@ -371,8 +405,11 @@ src/
   generator/
     storyBuilder.ts           CSF3 story content builder
     storyWriter.ts            File writer with collision protection
+  mcp/
+    server.ts                 MCP server (list/get/story/check tools)
   utils/
     logger.ts                 Chalk-based logger
+    typecheck.ts              Shared tsconfig finder + tsc output parser
 tests/
   fixtures/                   Sample React components
   typeMapper.test.ts          43 unit tests
@@ -380,4 +417,5 @@ tests/
   variantDetector.test.ts     20 unit tests
   integration.test.ts         15 integration tests
   e2e.test.ts                 6 end-to-end tests
+  mcp.test.ts                 12 MCP tool tests
 ```
