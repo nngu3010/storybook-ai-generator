@@ -10,6 +10,7 @@ import { writeStory } from '../../generator/storyWriter.js';
 import { logger } from '../../utils/logger.js';
 import { type TypeErrorInfo, findTsconfig, parseTscOutput } from '../../utils/typecheck.js';
 import { generateAiArgs, createAiClient } from '../../ai/argGenerator.js';
+import { generateHeuristicArgs } from '../../ai/heuristicGenerator.js';
 import type Anthropic from '@anthropic-ai/sdk';
 
 export interface GenerateOptions {
@@ -45,15 +46,17 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
     return;
   }
 
-  // Initialize AI client if --ai flag is set
+  // Initialize AI mode if --ai flag is set
   let aiClient: Anthropic | undefined;
+  let useHeuristic = false;
   if (opts.ai) {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      logger.error('--ai requires ANTHROPIC_API_KEY environment variable to be set');
-      process.exit(1);
+    if (process.env.ANTHROPIC_API_KEY) {
+      aiClient = createAiClient();
+      logger.info('AI mode: using Claude API for realistic arg values');
+    } else {
+      useHeuristic = true;
+      logger.info('AI mode: using smart heuristics (set ANTHROPIC_API_KEY for Claude-powered args)');
     }
-    aiClient = createAiClient();
-    logger.info('AI mode enabled — generating realistic arg values with Claude');
   }
 
   // Step 3: Parse → Map → Generate → Write each component
@@ -71,9 +74,12 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
 
       // Generate AI args if enabled
       let aiArgs;
-      if (aiClient && meta.props.length > 0) {
-        logger.info(`Generating AI args for ${meta.name}...`);
-        aiArgs = await generateAiArgs(meta, aiClient);
+      if (meta.props.length > 0) {
+        if (aiClient) {
+          aiArgs = await generateAiArgs(meta, aiClient);
+        } else if (useHeuristic) {
+          aiArgs = generateHeuristicArgs(meta);
+        }
       }
 
       const content = buildStoryContent(meta, relativePath, { aiArgs });
