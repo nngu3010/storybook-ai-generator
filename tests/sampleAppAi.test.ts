@@ -19,6 +19,9 @@ import { mapPropToArgType, getDefaultArg } from '../src/mapper/typeMapper.js';
 import type { AiStoryArgs } from '../src/ai/argGenerator.js';
 
 const SAMPLE_APP_SRC = path.resolve('/Users/nngu3010/dev/sample-app/src');
+const SAMPLE_APP_EXISTS = fs.existsSync(SAMPLE_APP_SRC);
+
+const describeIf = SAMPLE_APP_EXISTS ? describe : describe.skip;
 const STORY_FILES: string[] = [];
 
 // Realistic args that an AI agent would generate
@@ -158,7 +161,7 @@ afterAll(() => {
 // Discovery
 // ---------------------------------------------------------------------------
 
-describe('sample-app: discovery', () => {
+describeIf('sample-app: discovery', () => {
   it('finds all expected components', () => {
     const names = allComponents.map((c) => c.meta.name);
     expect(names).toContain('ProductCard');
@@ -177,7 +180,7 @@ describe('sample-app: discovery', () => {
 // Without AI: baseline (empty/default args)
 // ---------------------------------------------------------------------------
 
-describe('sample-app: baseline (no AI)', () => {
+describeIf('sample-app: baseline (no AI)', () => {
   it('ProductCard has empty string defaults', () => {
     const { meta } = allComponents.find((c) => c.meta.name === 'ProductCard')!;
     const content = buildStoryContent(meta, 'ProductCard.tsx');
@@ -210,7 +213,7 @@ describe('sample-app: baseline (no AI)', () => {
 // With AI args: realistic values
 // ---------------------------------------------------------------------------
 
-describe('sample-app: with AI args', () => {
+describeIf('sample-app: with AI args', () => {
   it('ProductCard has realistic product data', () => {
     const { meta } = allComponents.find((c) => c.meta.name === 'ProductCard')!;
     const content = buildStoryContent(meta, 'ProductCard.tsx', { aiArgs: AI_ARGS.ProductCard });
@@ -288,7 +291,7 @@ describe('sample-app: with AI args', () => {
 // Quality comparison: AI vs baseline
 // ---------------------------------------------------------------------------
 
-describe('sample-app: AI quality comparison', () => {
+describeIf('sample-app: AI quality comparison', () => {
   it('AI args produce longer, more meaningful story content', () => {
     const { meta } = allComponents.find((c) => c.meta.name === 'ProductCard')!;
     const baseline = buildStoryContent(meta, 'ProductCard.tsx');
