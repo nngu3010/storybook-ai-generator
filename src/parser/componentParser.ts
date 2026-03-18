@@ -316,6 +316,38 @@ function unwrapReactFc(type: Type): Type {
   return type;
 }
 
+/**
+ * Expands type aliases whose underlying type is a union of string/number/boolean
+ * literals (e.g. `type Variant = 'a' | 'b'` → `"a" | "b"`).
+ * Falls back to the default getText() representation for everything else.
+ */
+/**
+ * Expands type aliases whose underlying type is a union of string/number literals
+ * (e.g. `type Variant = 'a' | 'b'` → `"a" | "b"`).
+ * Skips pure boolean aliases (`true | false`) since `boolean` is already handled
+ * by the type mapper and expanding it would break the `control: 'boolean'` path.
+ * Falls back to the default getText() representation for everything else.
+ */
+function expandTypeAlias(type: Type, sourceFile: SourceFile): string {
+  // Strip optional wrapper (undefined) to check the base type
+  const baseType = type.getNonNullableType();
+  if (baseType.isUnion()) {
+    const members = baseType.getUnionTypes();
+    // Skip pure boolean unions (true | false) — let the mapper handle 'boolean'
+    const nonBool = members.filter((t) => !t.isBooleanLiteral());
+    if (nonBool.length === 0) return type.getText(sourceFile);
+
+    const isAllLiterals = members.every(
+      (t) => t.isStringLiteral() || t.isNumberLiteral() || t.isBooleanLiteral() || t.isUndefined() || t.isNull()
+    );
+    if (isAllLiterals) {
+      // Re-use the full type (including undefined for optional) for the text
+      return type.getUnionTypes().map((t) => t.getText(sourceFile)).join(' | ');
+    }
+  }
+  return type.getText(sourceFile);
+}
+
 function symbolToPropMeta(
   sym: MorphSymbol,
   sourceFile: SourceFile,
@@ -331,7 +363,7 @@ function symbolToPropMeta(
 
   // Determine type
   const type = sym.getTypeAtLocation(firstDecl ?? sourceFile);
-  const typeName = type.getText(sourceFile);
+  const typeName = expandTypeAlias(type, sourceFile);
 
   // Required: not optional and no default
   const isOptional = sym.isOptional();
