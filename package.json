@@ -30,6 +30,7 @@
     "registry": "https://registry.npmjs.org"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "chalk": "^5.3.0",
     "chokidar": "^3.6.0",
     "commander": "^12.0.0",

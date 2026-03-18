@@ -5,6 +5,7 @@ import { runVerify } from './commands/verify.js';
 import { runInit } from './commands/init.js';
 import { runWatch } from './commands/watch.js';
 import { runUpdate } from './commands/update.js';
+import { runServe } from './commands/serve.js';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -57,6 +58,13 @@ program
   .description('Pull latest changes and rebuild sbook-ai')
   .action(async () => {
     await runUpdate();
+  });
+
+program
+  .command('serve')
+  .description('Start an MCP server exposing component metadata and story generation tools')
+  .action(async () => {
+    await runServe();
   });
 
 program.parse(process.argv);
