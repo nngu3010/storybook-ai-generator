@@ -7,6 +7,8 @@ import { findComponents } from '../detector/componentFinder.js';
 import { buildProgram } from '../parser/programBuilder.js';
 import { parseComponent, type ComponentMeta } from '../parser/componentParser.js';
 import { buildStoryContent } from '../generator/storyBuilder.js';
+import { writeStory } from '../generator/storyWriter.js';
+import type { AiStoryArgs } from '../ai/argGenerator.js';
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -55,6 +57,46 @@ const TOOLS = [
       type: 'object',
       properties: {
         dir: { type: 'string', description: 'Directory to check' },
+      },
+      required: ['dir'],
+    },
+  },
+  {
+    name: 'generate_stories',
+    description:
+      'Generate Storybook story files for components. You can provide custom args for each story ' +
+      'to create realistic, meaningful examples — use get_component first to understand the props, ' +
+      'then craft args that demonstrate the component well. Stories are written to disk next to ' +
+      'each component. Existing hand-edited stories are never overwritten unless overwrite is true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dir: { type: 'string', description: 'Directory containing the components' },
+        components: {
+          type: 'array',
+          description: 'Optional list of component names to generate stories for. If omitted, generates for all components.',
+          items: { type: 'string' },
+        },
+        args: {
+          type: 'object',
+          description:
+            'Custom args per component. Keys are component names, values are objects with ' +
+            '`Default` (args for Default story) and `variants` (keyed by variant story name). ' +
+            'Example: {"Button":{"Default":{"label":"Save"},"variants":{"Danger":{"label":"Delete","variant":"danger"}}}}',
+          additionalProperties: {
+            type: 'object',
+            properties: {
+              Default: { type: 'object', description: 'Args for the Default story' },
+              variants: {
+                type: 'object',
+                description: 'Args per variant story name',
+                additionalProperties: { type: 'object' },
+              },
+            },
+          },
+        },
+        overwrite: { type: 'boolean', description: 'Overwrite existing hand-edited stories (default: false)' },
+        dryRun: { type: 'boolean', description: 'Preview what would be generated without writing files (default: false)' },
       },
       required: ['dir'],
     },
@@ -161,6 +203,62 @@ async function handleCheckStories(dir: string): Promise<string> {
   return JSON.stringify(results, null, 2);
 }
 
+async function handleGenerateStories(
+  dir: string,
+  componentNames?: string[],
+  argsMap?: Record<string, AiStoryArgs>,
+  overwrite?: boolean,
+  dryRun?: boolean,
+): Promise<string> {
+  const resolvedDir = path.resolve(dir);
+  const componentFiles = await findComponents(resolvedDir);
+
+  if (componentFiles.length === 0) {
+    return `No React components found in ${resolvedDir}`;
+  }
+
+  const project = buildProgram(resolvedDir, componentFiles);
+  const results: object[] = [];
+
+  for (const filePath of componentFiles) {
+    const meta = parseComponent(project, filePath);
+    if (meta.skipReason) continue;
+
+    // Filter to requested components if specified
+    if (componentNames && componentNames.length > 0) {
+      const match = componentNames.some(
+        (n) => n.toLowerCase() === meta.name.toLowerCase() ||
+               path.basename(filePath).toLowerCase().includes(n.toLowerCase()),
+      );
+      if (!match) continue;
+    }
+
+    const relativePath = path.basename(filePath);
+    const aiArgs = argsMap?.[meta.name];
+    const content = buildStoryContent(meta, relativePath, { aiArgs });
+
+    if (dryRun) {
+      results.push({
+        component: meta.name,
+        file: path.relative(resolvedDir, filePath),
+        status: 'dry-run',
+        preview: content,
+      });
+      continue;
+    }
+
+    const result = writeStory(filePath, content, { overwrite });
+    results.push({
+      component: meta.name,
+      file: path.relative(resolvedDir, filePath),
+      status: result,
+      ...(aiArgs ? { aiArgsApplied: true } : {}),
+    });
+  }
+
+  return JSON.stringify(results, null, 2);
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -214,23 +312,32 @@ export async function startMcpServer(version: string): Promise<void> {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    const input = (args ?? {}) as Record<string, string>;
+    const input = (args ?? {}) as Record<string, unknown>;
 
     try {
       let text: string;
 
       switch (name) {
         case 'list_components':
-          text = await handleListComponents(input.dir);
+          text = await handleListComponents(input.dir as string);
           break;
         case 'get_component':
-          text = await handleGetComponent(input.dir, input.name);
+          text = await handleGetComponent(input.dir as string, input.name as string);
           break;
         case 'get_story':
-          text = await handleGetStory(input.dir, input.name);
+          text = await handleGetStory(input.dir as string, input.name as string);
           break;
         case 'check_stories':
-          text = await handleCheckStories(input.dir);
+          text = await handleCheckStories(input.dir as string);
+          break;
+        case 'generate_stories':
+          text = await handleGenerateStories(
+            input.dir as string,
+            input.components as string[] | undefined,
+            input.args as Record<string, AiStoryArgs> | undefined,
+            input.overwrite as boolean | undefined,
+            input.dryRun as boolean | undefined,
+          );
           break;
         default:
           text = `Unknown tool: ${name}`;

@@ -4,6 +4,8 @@ import { findComponents } from '../src/detector/componentFinder.js';
 import { buildProgram } from '../src/parser/programBuilder.js';
 import { parseComponent } from '../src/parser/componentParser.js';
 import { buildStoryContent } from '../src/generator/storyBuilder.js';
+import { writeStory } from '../src/generator/storyWriter.js';
+import type { AiStoryArgs } from '../src/ai/argGenerator.js';
 import fs from 'fs';
 
 // Test the tool handlers directly rather than going through the MCP transport.
@@ -176,7 +178,7 @@ describe('mcp: check_stories', () => {
   });
 
   it('reports in-sync after writing a story', async () => {
-    const tmpDir = path.resolve('tests/.tmp-mcp-check');
+    const tmpDir = path.resolve('tests/.tmp-mcp-sync');
     fs.mkdirSync(tmpDir, { recursive: true });
 
     // Write a simple component
@@ -203,6 +205,150 @@ describe('mcp: check_stories', () => {
       const freshChecksum = content.match(/\/\/ @sbook-ai checksum: ([a-f0-9]+)/)?.[1];
 
       expect(existingChecksum).toBe(freshChecksum);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generate_stories
+// ---------------------------------------------------------------------------
+
+// Mirrors the MCP handler logic for testability without transport
+async function generateStories(
+  dir: string,
+  componentNames?: string[],
+  argsMap?: Record<string, AiStoryArgs>,
+  overwrite?: boolean,
+  dryRun?: boolean,
+) {
+  const resolvedDir = path.resolve(dir);
+  const componentFiles = await findComponents(resolvedDir);
+  const project = buildProgram(resolvedDir, componentFiles);
+  const results: object[] = [];
+
+  for (const filePath of componentFiles) {
+    const meta = parseComponent(project, filePath);
+    if (meta.skipReason) continue;
+
+    if (componentNames && componentNames.length > 0) {
+      const match = componentNames.some(
+        (n) => n.toLowerCase() === meta.name.toLowerCase() ||
+               path.basename(filePath).toLowerCase().includes(n.toLowerCase()),
+      );
+      if (!match) continue;
+    }
+
+    const relativePath = path.basename(filePath);
+    const aiArgs = argsMap?.[meta.name];
+    const content = buildStoryContent(meta, relativePath, { aiArgs });
+
+    if (dryRun) {
+      results.push({ component: meta.name, status: 'dry-run', content });
+      continue;
+    }
+
+    const result = writeStory(filePath, content, { overwrite });
+    results.push({ component: meta.name, status: result, aiArgsApplied: !!aiArgs });
+  }
+
+  return results;
+}
+
+describe('mcp: generate_stories', () => {
+  it('generates stories for all components in dry-run mode', async () => {
+    const results = await generateStories(FIXTURES_DIR, undefined, undefined, false, true) as any[];
+
+    expect(results.length).toBeGreaterThan(0);
+    for (const r of results) {
+      expect(r.status).toBe('dry-run');
+      expect(r.content).toContain('export const Default: Story');
+    }
+  });
+
+  it('filters to specific components by name', async () => {
+    const results = await generateStories(FIXTURES_DIR, ['Input'], undefined, false, true) as any[];
+
+    expect(results.length).toBe(1);
+    expect(results[0].component).toBe('Input');
+  });
+
+  it('applies custom AI args to generated stories', async () => {
+    const argsMap: Record<string, AiStoryArgs> = {
+      NoProps: {
+        Default: {},
+        variants: {},
+      },
+      Input: {
+        Default: { label: 'Email address', placeholder: 'you@example.com' },
+        variants: {},
+      },
+    };
+
+    const results = await generateStories(FIXTURES_DIR, ['Input'], argsMap, false, true) as any[];
+
+    expect(results.length).toBe(1);
+    expect(results[0].content).toContain('"Email address"');
+    expect(results[0].content).toContain('"you@example.com"');
+  });
+
+  it('writes story files to disk', async () => {
+    const tmpDir = path.resolve('tests/.tmp-mcp-gen');
+    fs.mkdirSync(tmpDir, { recursive: true });
+
+    fs.writeFileSync(
+      path.join(tmpDir, 'Widget.tsx'),
+      `export default function Widget({ title }: { title: string }) { return <h1>{title}</h1>; }`,
+    );
+
+    try {
+      const argsMap: Record<string, AiStoryArgs> = {
+        Widget: {
+          Default: { title: 'My Widget' },
+          variants: {},
+        },
+      };
+
+      const results = await generateStories(tmpDir, undefined, argsMap, false, false) as any[];
+
+      expect(results.length).toBe(1);
+      expect(results[0].status).toBe('written');
+      expect(results[0].aiArgsApplied).toBe(true);
+
+      // Verify file was written
+      const storyPath = path.join(tmpDir, 'Widget.stories.ts');
+      expect(fs.existsSync(storyPath)).toBe(true);
+
+      const content = fs.readFileSync(storyPath, 'utf-8');
+      expect(content).toContain('"My Widget"');
+      expect(content).toContain('export const Default: Story');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not overwrite hand-edited stories by default', async () => {
+    const tmpDir = path.resolve('tests/.tmp-mcp-no-overwrite');
+    fs.mkdirSync(tmpDir, { recursive: true });
+
+    fs.writeFileSync(
+      path.join(tmpDir, 'Alert.tsx'),
+      `export default function Alert({ message }: { message: string }) { return <div>{message}</div>; }`,
+    );
+
+    try {
+      // Generate first
+      await generateStories(tmpDir, undefined, undefined, false, false);
+
+      // Hand-edit the story (different checksum)
+      const storyPath = path.join(tmpDir, 'Alert.stories.ts');
+      fs.writeFileSync(storyPath, '// hand-edited\nexport const Custom = {};');
+
+      // Re-generate without overwrite
+      const results = await generateStories(tmpDir, undefined, undefined, false, false) as any[];
+
+      expect(results[0].status).toBe('conflict');
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
