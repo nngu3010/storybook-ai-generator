@@ -6,6 +6,14 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.test.ts'],
     exclude: ['tests/fixtures/**', 'node_modules/**', 'dist/**'],
+    server: {
+      deps: {
+        // Let Node handle ts-morph's CJS requires natively so that
+        // vitest's 'import' condition does not redirect minimatch's
+        // require() to the ESM build (dist/esm/index.js).
+        external: ['ts-morph', /\/@ts-morph\//],
+      },
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
@@ -14,8 +22,6 @@ export default defineConfig({
     },
   },
   resolve: {
-    // Allow TypeScript path resolution without .js extensions in source
-    // (vitest resolves these correctly in test mode)
     conditions: ['import', 'node'],
   },
 });
