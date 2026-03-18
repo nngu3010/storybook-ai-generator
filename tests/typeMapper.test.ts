@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapPropToArgType, getDefaultArg } from '../src/mapper/typeMapper.js';
+import { mapPropToArgType, getDefaultArg, isComponentTypeProp, isComponentRef } from '../src/mapper/typeMapper.js';
 import type { PropMeta } from '../src/parser/componentParser.js';
 
 function makeProp(overrides: Partial<PropMeta>): PropMeta {
@@ -273,5 +273,98 @@ describe('getDefaultArg', () => {
 
   it('returns empty string for "string | undefined"', () => {
     expect(getDefaultArg(makeProp({ typeName: 'string | undefined' }))).toBe('');
+  });
+
+  it('returns undefined for LucideIcon', () => {
+    expect(getDefaultArg(makeProp({ typeName: 'LucideIcon' }))).toBeUndefined();
+  });
+
+  it('returns undefined for ComponentType', () => {
+    expect(getDefaultArg(makeProp({ typeName: 'React.ComponentType<any>' }))).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mapPropToArgType — component type props
+// ---------------------------------------------------------------------------
+describe('mapPropToArgType — component type props', () => {
+  it('maps LucideIcon to control false', () => {
+    const result = mapPropToArgType(makeProp({ typeName: 'LucideIcon' }));
+    expect(result.control).toBe(false);
+  });
+
+  it('maps React.ComponentType to control false', () => {
+    const result = mapPropToArgType(makeProp({ typeName: 'React.ComponentType<any>' }));
+    expect(result.control).toBe(false);
+  });
+
+  it('maps FC to control false', () => {
+    const result = mapPropToArgType(makeProp({ typeName: 'FC<IconProps>' }));
+    expect(result.control).toBe(false);
+  });
+
+  it('maps ForwardRefExoticComponent to control false', () => {
+    const result = mapPropToArgType(makeProp({ typeName: 'ForwardRefExoticComponent<SVGProps>' }));
+    expect(result.control).toBe(false);
+  });
+
+  it('maps IconType to control false', () => {
+    const result = mapPropToArgType(makeProp({ typeName: 'IconType' }));
+    expect(result.control).toBe(false);
+  });
+
+  it('maps LucideIcon | undefined to control false', () => {
+    const result = mapPropToArgType(makeProp({ typeName: 'LucideIcon | undefined' }));
+    expect(result.control).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isComponentTypeProp
+// ---------------------------------------------------------------------------
+describe('isComponentTypeProp', () => {
+  it('returns true for LucideIcon', () => {
+    expect(isComponentTypeProp('LucideIcon')).toBe(true);
+  });
+
+  it('returns true for React.ComponentType<T>', () => {
+    expect(isComponentTypeProp('React.ComponentType<IconProps>')).toBe(true);
+  });
+
+  it('returns true for FC<T>', () => {
+    expect(isComponentTypeProp('FC<SvgProps>')).toBe(true);
+  });
+
+  it('returns true for nullable component types', () => {
+    expect(isComponentTypeProp('LucideIcon | undefined')).toBe(true);
+  });
+
+  it('returns false for string', () => {
+    expect(isComponentTypeProp('string')).toBe(false);
+  });
+
+  it('returns false for generic object types', () => {
+    expect(isComponentTypeProp('MyCustomType')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isComponentRef
+// ---------------------------------------------------------------------------
+describe('isComponentRef', () => {
+  it('returns true for a valid ComponentRef', () => {
+    expect(isComponentRef({ __componentRef: true, importName: 'Circle', importSource: 'lucide-react' })).toBe(true);
+  });
+
+  it('returns false for a plain object', () => {
+    expect(isComponentRef({ name: 'Circle' })).toBe(false);
+  });
+
+  it('returns false for null', () => {
+    expect(isComponentRef(null)).toBe(false);
+  });
+
+  it('returns false for a string', () => {
+    expect(isComponentRef('Circle')).toBe(false);
   });
 });
