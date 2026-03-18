@@ -6,6 +6,8 @@ import { runInit } from './commands/init.js';
 import { runWatch } from './commands/watch.js';
 import { runUpdate } from './commands/update.js';
 import { runServe } from './commands/serve.js';
+import { runDecorators } from './commands/decorators.js';
+import { runSetup } from './commands/setup.js';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -52,6 +54,23 @@ program
   .option('--overwrite', 'Overwrite existing story files', false)
   .action(async (dir: string | undefined, opts: { overwrite: boolean }) => {
     await runWatch(dir ?? '.', opts);
+  });
+
+program
+  .command('decorators [dir]')
+  .description('Detect state management libraries and generate .storybook/preview.ts with provider decorators')
+  .option('--force', 'Overwrite existing preview.ts and companion files', false)
+  .action(async (dir: string | undefined, opts: { force: boolean }) => {
+    await runDecorators(dir ?? '.', opts);
+  });
+
+program
+  .command('setup [dir]')
+  .description('Configure MCP server and/or Anthropic API key for AI-powered story generation')
+  .option('--mcp', 'Set up MCP server config (non-interactive)')
+  .option('--api-key', 'Set up Anthropic API key (interactive)')
+  .action(async (dir: string | undefined, opts: { mcp?: boolean; apiKey?: boolean }) => {
+    await runSetup(dir ?? '.', opts);
   });
 
 program
