@@ -63,6 +63,9 @@ export function getDefaultArg(prop: PropMeta): unknown {
   // Array types — return empty array
   if (/\[\]$/.test(clean) || /^Array</.test(clean)) return [];
 
+  // Record / object types — return empty object
+  if (/^Record</.test(clean) || /^{/.test(clean)) return {};
+
   return undefined;
 }
 
