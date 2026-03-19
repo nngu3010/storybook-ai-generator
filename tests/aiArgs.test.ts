@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { buildStoryContent } from '../src/generator/storyBuilder.js';
+import { generateHeuristicArgs } from '../src/ai/heuristicGenerator.js';
+import { isComponentRef } from '../src/mapper/typeMapper.js';
 import type { ComponentMeta } from '../src/parser/componentParser.js';
 import type { AiStoryArgs } from '../src/ai/argGenerator.js';
 
@@ -293,5 +295,126 @@ describe('AI args for component without variants', () => {
     expect(content).toContain('"Project Alpha"');
     expect(content).toContain('"A new initiative"');
     expect(content).toContain('12');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// storyBuilder with component-type props (ComponentRef)
+// ---------------------------------------------------------------------------
+
+const statsCardMeta: ComponentMeta = {
+  name: 'StatsCard',
+  filePath: '/src/components/StatsCard.tsx',
+  props: [
+    { name: 'title', typeName: 'string', required: true },
+    { name: 'icon', typeName: 'LucideIcon', required: true },
+    { name: 'value', typeName: 'number', required: true },
+  ],
+};
+
+describe('storyBuilder with component-type props', () => {
+  it('emits import for ComponentRef args', () => {
+    const aiArgs: AiStoryArgs = {
+      Default: {
+        title: 'Revenue',
+        icon: { __componentRef: true, importName: 'Circle', importSource: 'lucide-react' },
+        value: 42,
+      },
+      variants: {},
+    };
+    const content = buildStoryContent(statsCardMeta, 'StatsCard.tsx', { aiArgs });
+
+    expect(content).toContain("import { Circle } from 'lucide-react'");
+    expect(content).toContain('icon: Circle,');
+    expect(content).not.toContain('icon: undefined');
+  });
+
+  it('emits component ref as raw identifier not JSON string', () => {
+    const aiArgs: AiStoryArgs = {
+      Default: {
+        title: 'Users',
+        icon: { __componentRef: true, importName: 'User', importSource: 'lucide-react' },
+        value: 100,
+      },
+      variants: {},
+    };
+    const content = buildStoryContent(statsCardMeta, 'StatsCard.tsx', { aiArgs });
+
+    // Should NOT be JSON-stringified
+    expect(content).not.toContain('"__componentRef"');
+    expect(content).toContain('icon: User,');
+  });
+
+  it('deduplicates imports when same ref used in multiple stories', () => {
+    const aiArgs: AiStoryArgs = {
+      Default: {
+        title: 'Revenue',
+        icon: { __componentRef: true, importName: 'Circle', importSource: 'lucide-react' },
+        value: 42,
+      },
+      variants: {
+        Large: {
+          title: 'Big Revenue',
+          icon: { __componentRef: true, importName: 'Circle', importSource: 'lucide-react' },
+          value: 999,
+        },
+      },
+    };
+    const content = buildStoryContent(statsCardMeta, 'StatsCard.tsx', { aiArgs });
+
+    // Should only appear once
+    const matches = content.match(/import \{ Circle \} from 'lucide-react'/g);
+    expect(matches).toHaveLength(1);
+  });
+
+  it('maps LucideIcon argType to control: false', () => {
+    const aiArgs: AiStoryArgs = {
+      Default: {
+        title: 'Test',
+        icon: { __componentRef: true, importName: 'Circle', importSource: 'lucide-react' },
+        value: 0,
+      },
+      variants: {},
+    };
+    const content = buildStoryContent(statsCardMeta, 'StatsCard.tsx', { aiArgs });
+
+    expect(content).toContain('icon: { control: false }');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Heuristic generator with component-type props
+// ---------------------------------------------------------------------------
+
+describe('heuristic generator with component-type props', () => {
+  it('generates ComponentRef for LucideIcon prop', () => {
+    const result = generateHeuristicArgs(statsCardMeta);
+
+    expect(isComponentRef(result.Default.icon)).toBe(true);
+    const ref = result.Default.icon as any;
+    expect(ref.importName).toBe('Circle');
+    expect(ref.importSource).toBe('lucide-react');
+  });
+
+  it('chooses contextual icon based on prop name', () => {
+    const meta: ComponentMeta = {
+      name: 'SearchBar',
+      filePath: '/src/components/SearchBar.tsx',
+      props: [
+        { name: 'searchIcon', typeName: 'LucideIcon', required: true },
+      ],
+    };
+    const result = generateHeuristicArgs(meta);
+
+    const ref = result.Default.searchIcon as any;
+    expect(ref.importName).toBe('Search');
+    expect(ref.importSource).toBe('lucide-react');
+  });
+
+  it('still generates normal args for non-component props', () => {
+    const result = generateHeuristicArgs(statsCardMeta);
+
+    expect(typeof result.Default.title).toBe('string');
+    expect(typeof result.Default.value).toBe('number');
   });
 });

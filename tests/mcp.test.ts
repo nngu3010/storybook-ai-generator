@@ -5,6 +5,11 @@ import { buildProgram } from '../src/parser/programBuilder.js';
 import { parseComponent } from '../src/parser/componentParser.js';
 import { buildStoryContent } from '../src/generator/storyBuilder.js';
 import { writeStory } from '../src/generator/storyWriter.js';
+import { mapPropToArgType } from '../src/mapper/typeMapper.js';
+import { detectVariantProp, generateVariantStories } from '../src/mapper/variantDetector.js';
+import { generateHeuristicArgs } from '../src/ai/heuristicGenerator.js';
+import { categorizeHint } from '../src/ai/heuristicGenerator.js';
+import { scanProjectContext } from '../src/mcp/contextScanner.js';
 import type { AiStoryArgs } from '../src/ai/argGenerator.js';
 import fs from 'fs';
 
@@ -352,5 +357,233 @@ describe('mcp: generate_stories', () => {
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Enhanced get_component: variantProp, argTypes, hints
+// ---------------------------------------------------------------------------
+describe('mcp: enhanced get_component', () => {
+  it('includes variantProp for Button', async () => {
+    const meta = await getComponent(FIXTURES_DIR, 'Button');
+    expect(meta).not.toBeNull();
+
+    const variantProp = detectVariantProp(meta!.props);
+    expect(variantProp).toBeDefined();
+    expect(variantProp!.name).toBe('variant');
+
+    const stories = generateVariantStories(variantProp!);
+    expect(stories.length).toBeGreaterThanOrEqual(2);
+    expect(stories[0]).toHaveProperty('name');
+    expect(stories[0]).toHaveProperty('value');
+  });
+
+  it('includes argTypes for all props', async () => {
+    const meta = await getComponent(FIXTURES_DIR, 'Button');
+    expect(meta).not.toBeNull();
+
+    const argTypes: Record<string, { control: unknown; options?: string[] }> = {};
+    for (const p of meta!.props) {
+      const at = mapPropToArgType(p);
+      const entry: { control: unknown; options?: string[] } = { control: at.control ?? at.action ?? null };
+      if (at.options) entry.options = at.options;
+      argTypes[p.name] = entry;
+    }
+
+    expect(argTypes.label).toBeDefined();
+    expect(argTypes.label.control).toBe('text');
+    expect(argTypes.variant).toBeDefined();
+    expect(argTypes.variant.control).toBe('select');
+    expect(argTypes.variant.options).toBeDefined();
+    expect(argTypes.variant.options!.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('includes hints for props with recognizable semantics', async () => {
+    const meta = await getComponent(FIXTURES_DIR, 'Button');
+    expect(meta).not.toBeNull();
+
+    const hints: Record<string, string> = {};
+    for (const p of meta!.props) {
+      const hint = categorizeHint(p, meta!.name);
+      if (hint) hints[p.name] = hint;
+    }
+
+    expect(hints.label).toBe('cta_text');
+    expect(hints.variant).toBe('variant_selector');
+  });
+
+  it('returns no variantProp for NoProps component', async () => {
+    const meta = await getComponent(FIXTURES_DIR, 'NoProps');
+    expect(meta).not.toBeNull();
+    expect(meta!.props.length).toBe(0);
+
+    const variantProp = detectVariantProp(meta!.props);
+    expect(variantProp).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// suggest_args
+// ---------------------------------------------------------------------------
+describe('mcp: suggest_args', () => {
+  it('returns valid AiStoryArgs for Button', async () => {
+    const meta = await getComponent(FIXTURES_DIR, 'Button');
+    expect(meta).not.toBeNull();
+
+    const args = generateHeuristicArgs(meta!);
+
+    expect(args).toHaveProperty('Default');
+    expect(args).toHaveProperty('variants');
+    expect(typeof args.Default).toBe('object');
+    // Button should have label in default args
+    expect(args.Default).toHaveProperty('label');
+    expect(typeof args.Default.label).toBe('string');
+    // Button should have variant stories
+    expect(Object.keys(args.variants).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('handles no-props components gracefully', async () => {
+    const meta = await getComponent(FIXTURES_DIR, 'NoProps');
+    expect(meta).not.toBeNull();
+
+    const args = generateHeuristicArgs(meta!);
+
+    expect(args).toHaveProperty('Default');
+    expect(args).toHaveProperty('variants');
+    expect(Object.keys(args.Default)).toHaveLength(0);
+    expect(Object.keys(args.variants)).toHaveLength(0);
+  });
+
+  it('returns args for Input with relevant string values', async () => {
+    const meta = await getComponent(FIXTURES_DIR, 'Input');
+    expect(meta).not.toBeNull();
+
+    const args = generateHeuristicArgs(meta!);
+
+    expect(args.Default).toHaveProperty('value');
+    expect(typeof args.Default.value).toBe('string');
+    // placeholder should have a meaningful string
+    if (args.Default.placeholder !== undefined) {
+      expect(typeof args.Default.placeholder).toBe('string');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// scan_project_context
+// ---------------------------------------------------------------------------
+describe('mcp: scan_project_context', () => {
+  it('scans a temp dir with component usage and mock data', async () => {
+    const tmpDir = path.resolve('tests/.tmp-mcp-context');
+    fs.mkdirSync(path.join(tmpDir, 'components'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '__mocks__'), { recursive: true });
+
+    // Write a component
+    fs.writeFileSync(
+      path.join(tmpDir, 'components', 'Alert.tsx'),
+      `export default function Alert({ message }: { message: string }) { return <div>{message}</div>; }`,
+    );
+
+    // Write a file that uses the component
+    fs.writeFileSync(
+      path.join(tmpDir, 'App.tsx'),
+      `import Alert from './components/Alert';\nexport default function App() { return <Alert message="Hello" />; }`,
+    );
+
+    // Write a mock data file
+    fs.writeFileSync(
+      path.join(tmpDir, '__mocks__', 'data.ts'),
+      `export const mockAlerts = [\n  { message: "Test alert 1" },\n  { message: "Test alert 2" },\n];`,
+    );
+
+    try {
+      const result = await scanProjectContext(tmpDir, 'Alert');
+
+      // Should find usage in App.tsx
+      expect(result.componentUsages.length).toBeGreaterThanOrEqual(1);
+      const appUsage = result.componentUsages.find((u) => u.file.includes('App.tsx'));
+      expect(appUsage).toBeDefined();
+      expect(appUsage!.snippets.length).toBeGreaterThanOrEqual(1);
+      expect(appUsage!.snippets[0]).toContain('Alert');
+
+      // Should find mock data
+      expect(result.mockDataFiles.length).toBeGreaterThanOrEqual(1);
+      const mockFile = result.mockDataFiles.find((m) => m.file.includes('data.ts'));
+      expect(mockFile).toBeDefined();
+      expect(mockFile!.preview).toContain('mockAlerts');
+
+      // Storybook config not present
+      expect(result.storybookConfig.main).toBeUndefined();
+      expect(result.storybookConfig.preview).toBeUndefined();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('finds storybook config when present', async () => {
+    const tmpDir = path.resolve('tests/.tmp-mcp-sb-config');
+    fs.mkdirSync(path.join(tmpDir, '.storybook'), { recursive: true });
+
+    fs.writeFileSync(
+      path.join(tmpDir, '.storybook', 'main.ts'),
+      `export default { stories: ['../src/**/*.stories.@(ts|tsx)'] };`,
+    );
+
+    fs.writeFileSync(
+      path.join(tmpDir, '.storybook', 'preview.ts'),
+      `export const parameters = { actions: { argTypesRegex: "^on[A-Z].*" } };`,
+    );
+
+    try {
+      const result = await scanProjectContext(tmpDir, 'Anything');
+
+      expect(result.storybookConfig.main).toContain('stories');
+      expect(result.storybookConfig.preview).toContain('parameters');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns empty results for empty directory', async () => {
+    const tmpDir = path.resolve('tests/.tmp-mcp-empty');
+    fs.mkdirSync(tmpDir, { recursive: true });
+
+    try {
+      const result = await scanProjectContext(tmpDir, 'Button');
+
+      expect(result.componentUsages).toHaveLength(0);
+      expect(result.mockDataFiles).toHaveLength(0);
+      expect(result.designTokenFiles).toHaveLength(0);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Integration: suggest_args → generate_stories
+// ---------------------------------------------------------------------------
+describe('mcp: suggest_args → generate_stories integration', () => {
+  it('suggested args produce valid story content', async () => {
+    const meta = await getComponent(FIXTURES_DIR, 'Button');
+    expect(meta).not.toBeNull();
+
+    // Get suggested args
+    const suggestedArgs = generateHeuristicArgs(meta!);
+
+    // Use them in generate_stories dry-run
+    const argsMap: Record<string, AiStoryArgs> = {
+      Button: suggestedArgs,
+    };
+
+    const results = await generateStories(FIXTURES_DIR, ['Button'], argsMap, false, true) as any[];
+
+    expect(results.length).toBeGreaterThanOrEqual(1);
+    const buttonResult = results.find((r: any) => r.component === 'Button');
+    expect(buttonResult).toBeDefined();
+    expect(buttonResult.status).toBe('dry-run');
+    expect(buttonResult.content).toContain('export const Default: Story');
+    // The suggested label value should appear in the output
+    expect(buttonResult.content).toContain(String(suggestedArgs.Default.label));
   });
 });

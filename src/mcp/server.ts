@@ -8,6 +8,11 @@ import { buildProgram } from '../parser/programBuilder.js';
 import { parseComponent, type ComponentMeta } from '../parser/componentParser.js';
 import { buildStoryContent } from '../generator/storyBuilder.js';
 import { writeStory } from '../generator/storyWriter.js';
+import { mapPropToArgType } from '../mapper/typeMapper.js';
+import { detectVariantProp, generateVariantStories } from '../mapper/variantDetector.js';
+import { generateHeuristicArgs } from '../ai/heuristicGenerator.js';
+import { categorizeHint } from '../ai/heuristicGenerator.js';
+import { scanProjectContext } from './contextScanner.js';
 import type { AiStoryArgs } from '../ai/argGenerator.js';
 
 // ---------------------------------------------------------------------------
@@ -59,6 +64,36 @@ const TOOLS = [
         dir: { type: 'string', description: 'Directory to check' },
       },
       required: ['dir'],
+    },
+  },
+  {
+    name: 'suggest_args',
+    description:
+      'Get smart heuristic-generated arg values for a component. Returns realistic args based on ' +
+      'prop names, types, and component context — no API key needed. Review and tweak the result, ' +
+      'then pass to generate_stories.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dir: { type: 'string', description: 'Directory that was scanned' },
+        name: { type: 'string', description: 'Component name (e.g. "Button") or file path' },
+      },
+      required: ['dir', 'name'],
+    },
+  },
+  {
+    name: 'scan_project_context',
+    description:
+      'Scan a project for contextual information that helps craft better story args. ' +
+      'Finds component usages (how the component is rendered elsewhere), mock/fixture data files, ' +
+      'design tokens (theme/colors), and Storybook config. Output is capped at ~4000 chars.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dir: { type: 'string', description: 'Project root directory to scan' },
+        component: { type: 'string', description: 'Component name to find usages for (e.g. "Button")' },
+      },
+      required: ['dir', 'component'],
     },
   },
   {
@@ -139,6 +174,34 @@ async function handleGetComponent(dir: string, name: string): Promise<string> {
 
   if ('error' in meta) return meta.error;
 
+  // Variant detection
+  const variantProp = detectVariantProp(meta.props);
+  let variantInfo: object | undefined;
+  if (variantProp) {
+    const stories = generateVariantStories(variantProp);
+    variantInfo = {
+      name: variantProp.name,
+      values: stories.map((s) => s.value),
+      suggestedStories: stories.map((s) => s.name),
+    };
+  }
+
+  // ArgTypes mapping
+  const argTypes: Record<string, { control: unknown; options?: string[] }> = {};
+  for (const p of meta.props) {
+    const at = mapPropToArgType(p);
+    const entry: { control: unknown; options?: string[] } = { control: at.control ?? at.action ?? null };
+    if (at.options) entry.options = at.options;
+    argTypes[p.name] = entry;
+  }
+
+  // Semantic hints
+  const hints: Record<string, string> = {};
+  for (const p of meta.props) {
+    const hint = categorizeHint(p, meta.name);
+    if (hint) hints[p.name] = hint;
+  }
+
   const result = {
     name: meta.name,
     file: meta.filePath,
@@ -150,6 +213,9 @@ async function handleGetComponent(dir: string, name: string): Promise<string> {
       ...(p.description ? { description: p.description } : {}),
       ...(p.deprecated ? { deprecated: true } : {}),
     })),
+    ...(variantInfo ? { variantProp: variantInfo } : {}),
+    argTypes,
+    hints,
   };
 
   return JSON.stringify(result, null, 2);
@@ -201,6 +267,22 @@ async function handleCheckStories(dir: string): Promise<string> {
   }
 
   return JSON.stringify(results, null, 2);
+}
+
+async function handleSuggestArgs(dir: string, name: string): Promise<string> {
+  const meta = await resolveComponentMeta(dir, name);
+
+  if ('error' in meta) return meta.error;
+
+  const suggestedArgs = generateHeuristicArgs(meta);
+
+  return JSON.stringify({ component: meta.name, suggestedArgs }, null, 2);
+}
+
+async function handleScanProjectContext(dir: string, component: string): Promise<string> {
+  const resolvedDir = path.resolve(dir);
+  const result = await scanProjectContext(resolvedDir, component);
+  return JSON.stringify(result, null, 2);
 }
 
 async function handleGenerateStories(
@@ -329,6 +411,12 @@ export async function startMcpServer(version: string): Promise<void> {
           break;
         case 'check_stories':
           text = await handleCheckStories(input.dir as string);
+          break;
+        case 'suggest_args':
+          text = await handleSuggestArgs(input.dir as string, input.name as string);
+          break;
+        case 'scan_project_context':
+          text = await handleScanProjectContext(input.dir as string, input.component as string);
           break;
         case 'generate_stories':
           text = await handleGenerateStories(

@@ -73,6 +73,26 @@ Remind users that storybook-gen works best when components:
 - Use **string literal unions** for variant props (e.g., `'primary' | 'secondary'`)
 - Use **destructuring with defaults** for default prop values
 
+## MCP-Aware Workflow
+
+When the project is connected via MCP (tools like `list_components`, `get_component`, etc. are available), use this enhanced workflow for richer, context-aware story generation:
+
+### Step 1: Discover & check
+1. `list_components` → get all components in the project
+2. `check_stories` → identify which components need stories (missing or outdated)
+
+### Step 2: For each component needing stories
+1. `get_component` → get full prop metadata including `variantProp`, `argTypes`, and `hints`
+2. `scan_project_context` → find how the component is used in the codebase, mock data, and design tokens
+3. `suggest_args` → get heuristic-generated arg values as a starting point
+4. Review the suggested args and refine them using context from step 2 (real usage patterns, mock data, etc.)
+5. `generate_stories` → generate with the refined args
+
+### Step 3: Verify
+1. `check_stories` → confirm all stories are now in sync
+
+This workflow produces stories with realistic, context-aware arg values rather than generic defaults.
+
 ## Example interaction
 
 User: `/storybook`

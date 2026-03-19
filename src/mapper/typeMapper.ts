@@ -11,6 +11,29 @@ export interface ArgTypeMeta {
 }
 
 /**
+ * Marker for component-reference arg values that cannot be JSON-serialized.
+ * The story builder emits these as raw identifiers with a corresponding import.
+ */
+export interface ComponentRef {
+  __componentRef: true;
+  importName: string;
+  importSource: string;
+}
+
+export function isComponentRef(value: unknown): value is ComponentRef {
+  return typeof value === 'object' && value !== null && (value as any).__componentRef === true;
+}
+
+/**
+ * Returns true if the type string represents a React component type
+ * (e.g. LucideIcon, ComponentType, FC, IconType, ForwardRefExoticComponent).
+ */
+export function isComponentTypeProp(typeName: string): boolean {
+  const clean = stripNullable(typeName);
+  return isComponentType(clean);
+}
+
+/**
  * Maps a parsed PropMeta to a Storybook ArgType definition.
  */
 export function mapPropToArgType(prop: PropMeta): ArgTypeMeta {
@@ -108,6 +131,11 @@ function resolveControl(prop: PropMeta): ResolvedControl {
     return { control: false };
   }
 
+  // Component type props (LucideIcon, ComponentType, FC, IconType, etc.) → no control
+  if (isComponentType(clean)) {
+    return { control: false };
+  }
+
   // CSSProperties → object
   if (/\bCSSProperties\b|\bReact\.CSSProperties\b/.test(clean)) {
     return { control: 'object' };
@@ -142,6 +170,10 @@ function resolveControl(prop: PropMeta): ResolvedControl {
 function isFunctionType(typeName: string): boolean {
   // Matches: () => void, (x: string) => void, (...args: any[]) => any, etc.
   return /^\s*\(.*\)\s*=>\s*\S/.test(typeName) || /^Function$/.test(typeName);
+}
+
+function isComponentType(typeName: string): boolean {
+  return /\b(LucideIcon|IconType|ComponentType|React\.ComponentType|FC|React\.FC|FunctionComponent|React\.FunctionComponent|ForwardRefExoticComponent|React\.ForwardRefExoticComponent|ElementType|React\.ElementType)\b/.test(typeName);
 }
 
 function extractStringLiterals(typeName: string): string[] {

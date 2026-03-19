@@ -1,5 +1,5 @@
 import type { ComponentMeta, PropMeta } from '../parser/componentParser.js';
-import { getDefaultArg } from '../mapper/typeMapper.js';
+import { getDefaultArg, isComponentTypeProp, type ComponentRef } from '../mapper/typeMapper.js';
 import { detectVariantProp, generateVariantStories } from '../mapper/variantDetector.js';
 import type { AiStoryArgs } from './argGenerator.js';
 
@@ -74,6 +74,11 @@ function inferContext(componentName: string): ComponentContext {
 // ---------------------------------------------------------------------------
 
 function inferValue(prop: PropMeta, context: ComponentContext, variantIndex: number): unknown {
+  // Component-type props (LucideIcon, ComponentType, etc.) → return a safe default component ref
+  if (isComponentTypeProp(prop.typeName)) {
+    return inferComponentRef(prop);
+  }
+
   // If prop has a real default value, use it — but skip empty arrays/objects
   // since the heuristic can generate better sample data
   if (prop.defaultValue !== undefined && prop.defaultValue !== '[]' && prop.defaultValue !== '{}') {
@@ -317,6 +322,145 @@ function inferArrayValue(prop: PropMeta, context: ComponentContext): unknown[] {
 
 function isFunctionProp(typeName: string): boolean {
   return /^\s*\(.*\)\s*=>\s*\S/.test(typeName) || /^Function$/.test(typeName);
+}
+
+// ---------------------------------------------------------------------------
+// Hint categorization — exposes heuristic intelligence to MCP clients
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a semantic category hint for a prop based on its name, type,
+ * and component context. Reuses STRING_PATTERNS + inferContext logic.
+ */
+export function categorizeHint(prop: PropMeta, componentName: string): string | undefined {
+  const name = prop.name.toLowerCase();
+  const clean = stripNullable(prop.typeName);
+
+  // Function props
+  if (isFunctionProp(clean)) return 'callback';
+
+  // Component type props
+  if (isComponentTypeProp(clean)) return 'component_ref';
+
+  // Boolean categories
+  if (clean === 'boolean') {
+    if (/disabled|loading|readonly|read[-_]?only|error/i.test(name)) return 'disabled_state';
+    if (/open|visible|show|active|enabled|checked|selected|expanded/i.test(name)) return 'visibility_state';
+    return 'toggle';
+  }
+
+  // Number categories
+  if (clean === 'number') {
+    if (/price|cost|amount|total|msrp/i.test(name)) return 'price';
+    if (/count|quantity|qty/i.test(name)) return 'count';
+    if (/rating|score/i.test(name)) return 'rating';
+    if (/percent|progress/i.test(name)) return 'percentage';
+    if (/width|height/i.test(name)) return 'dimension';
+    if (/delay|duration|timeout/i.test(name)) return 'duration';
+    return undefined;
+  }
+
+  // String literal union → variant selector
+  if (isStringLiteralUnion(clean)) return 'variant_selector';
+
+  // Array types
+  if (/\[\]$/.test(clean) || /^Array</.test(clean)) return 'list_data';
+
+  // Record / object types
+  if (/^Record</.test(clean) || /^\{/.test(clean)) return 'object_data';
+
+  // String categories — check patterns
+  if (clean === 'string') {
+    for (const { match } of STRING_PATTERNS) {
+      if (match.test(name)) {
+        // Derive category from pattern
+        if (/email/i.test(match.source)) return 'email';
+        if (/phone/i.test(match.source)) return 'phone';
+        if (/url|href|link|src/i.test(match.source)) return 'url';
+        if (/image|img|photo|avatar|thumbnail/i.test(match.source)) return 'image_url';
+        if (/title|heading/i.test(match.source)) return 'title';
+        if (/description|desc|summary|body|content/i.test(match.source)) return 'long_text';
+        if (/label|text|caption/i.test(match.source)) return 'cta_text';
+        if (/cta|button[-_]?text|action/i.test(match.source)) return 'cta_text';
+        if (/name/i.test(match.source)) return 'person_name';
+        if (/date|created|updated/i.test(match.source)) return 'date';
+        if (/time$/i.test(match.source)) return 'time';
+        if (/color|colour/i.test(match.source)) return 'color';
+        if (/status/i.test(match.source)) return 'status';
+        if (/placeholder/i.test(match.source)) return 'placeholder';
+        if (/id$/i.test(match.source)) return 'identifier';
+        if (/category/i.test(match.source)) return 'category';
+        if (/tag|badge/i.test(match.source)) return 'tag';
+        if (/size/i.test(match.source)) return 'size';
+        if (/type|kind|variant/i.test(match.source)) return 'variant_selector';
+        if (/icon/i.test(match.source)) return 'icon_name';
+        if (/query|search|keyword/i.test(match.source)) return 'search_query';
+        if (/message/i.test(match.source)) return 'message';
+        if (/subtitle|subheading/i.test(match.source)) return 'subtitle';
+        if (/emoji/i.test(match.source)) return 'emoji';
+        if (/background/i.test(match.source)) return 'color';
+      }
+    }
+
+    // Context-aware name prop
+    if (/^name$/i.test(name)) {
+      const ctx = inferContext(componentName);
+      if (ctx === 'user') return 'person_name';
+      if (ctx === 'product' || ctx === 'cart' || ctx === 'card') return 'product_name';
+      return 'display_name';
+    }
+
+    // Context-aware image prop
+    if (/^(image|img|photo|thumbnail)$/i.test(name)) return 'image_url';
+  }
+
+  return undefined;
+}
+
+function inferComponentRef(prop: PropMeta): ComponentRef {
+  const name = prop.name.toLowerCase();
+  const typeName = prop.typeName;
+
+  // LucideIcon → use lucide-react icons, chosen by prop name
+  if (/\bLucideIcon\b/.test(typeName)) {
+    if (name.includes('close') || name.includes('dismiss')) {
+      return { __componentRef: true, importName: 'X', importSource: 'lucide-react' };
+    }
+    if (name.includes('search')) {
+      return { __componentRef: true, importName: 'Search', importSource: 'lucide-react' };
+    }
+    if (name.includes('user') || name.includes('avatar')) {
+      return { __componentRef: true, importName: 'User', importSource: 'lucide-react' };
+    }
+    if (name.includes('setting') || name.includes('config')) {
+      return { __componentRef: true, importName: 'Settings', importSource: 'lucide-react' };
+    }
+    if (name.includes('arrow')) {
+      return { __componentRef: true, importName: 'ArrowRight', importSource: 'lucide-react' };
+    }
+    if (name.includes('check') || name.includes('success')) {
+      return { __componentRef: true, importName: 'Check', importSource: 'lucide-react' };
+    }
+    if (name.includes('warning') || name.includes('alert')) {
+      return { __componentRef: true, importName: 'AlertTriangle', importSource: 'lucide-react' };
+    }
+    if (name.includes('info')) {
+      return { __componentRef: true, importName: 'Info', importSource: 'lucide-react' };
+    }
+    if (name.includes('error') || name.includes('danger')) {
+      return { __componentRef: true, importName: 'XCircle', importSource: 'lucide-react' };
+    }
+    // Default: Circle is always safe and visually neutral
+    return { __componentRef: true, importName: 'Circle', importSource: 'lucide-react' };
+  }
+
+  // react-icons IconType
+  if (/\bIconType\b/.test(typeName)) {
+    return { __componentRef: true, importName: 'FiCircle', importSource: 'react-icons/fi' };
+  }
+
+  // Generic ComponentType / FC / ElementType — use a safe lucide icon as fallback
+  return { __componentRef: true, importName: 'Circle', importSource: 'lucide-react' };
 }
 
 function stripNullable(typeName: string): string {
