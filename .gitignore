@@ -2,3 +2,13 @@ node_modules/
 dist/
 *.js.map
 .DS_Store
+
+*storybook.log
+storybook-static
+
+# AI/IDE config
+.clinerules
+.cursorrules
+.windsurfrules
+.github/copilot-instructions.md
+.mcp.json
