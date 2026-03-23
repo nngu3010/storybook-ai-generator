@@ -74,7 +74,7 @@ export function writeStory(
   const existingChecksum = extractChecksum(existingContent);
   const newChecksum = extractChecksum(content);
 
-  if (existingChecksum && newChecksum && existingChecksum === newChecksum) {
+  if (existingChecksum && newChecksum && existingChecksum === newChecksum && !opts.overwrite) {
     return 'skipped';
   }
 

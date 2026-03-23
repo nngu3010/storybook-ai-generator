@@ -98,9 +98,11 @@ export function buildStoryContent(
   }
   lines.push(`};`);
 
-  // Variant stories
+  // Variant stories from detected variant prop
+  const emittedVariantNames = new Set<string>();
   for (const variant of variantStories) {
     const variantName = sanitiseIdentifier(variant.name);
+    emittedVariantNames.add(variant.name);
     const aiVariantArgs = options.aiArgs?.variants?.[variant.name];
 
     lines.push(``);
@@ -123,6 +125,22 @@ export function buildStoryContent(
 
     lines.push(`  },`);
     lines.push(`};`);
+  }
+
+  // Emit custom variant args not already covered by detected variant prop
+  if (options.aiArgs?.variants) {
+    for (const [name, args] of Object.entries(options.aiArgs.variants)) {
+      if (emittedVariantNames.has(name)) continue;
+      const variantName = sanitiseIdentifier(name);
+      lines.push(``);
+      lines.push(`export const ${variantName}: Story = {`);
+      lines.push(`  args: {`);
+      for (const [k, v] of Object.entries(args)) {
+        lines.push(`    ${k}: ${serializeArgValue(v)},`);
+      }
+      lines.push(`  },`);
+      lines.push(`};`);
+    }
   }
 
   lines.push(``);

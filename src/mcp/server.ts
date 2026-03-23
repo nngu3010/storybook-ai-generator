@@ -13,7 +13,7 @@ import { detectVariantProp, generateVariantStories } from '../mapper/variantDete
 import { generateHeuristicArgs } from '../ai/heuristicGenerator.js';
 import { categorizeHint } from '../ai/heuristicGenerator.js';
 import { scanProjectContext } from './contextScanner.js';
-import type { AiStoryArgs } from '../ai/argGenerator.js';
+import { generateAiArgs, createAiClient, type AiStoryArgs } from '../ai/argGenerator.js';
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -130,6 +130,7 @@ const TOOLS = [
             },
           },
         },
+        ai: { type: 'boolean', description: 'Use Claude AI to generate realistic arg values (requires ANTHROPIC_API_KEY env var). Falls back to heuristics if unavailable.' },
         overwrite: { type: 'boolean', description: 'Overwrite existing hand-edited stories (default: false)' },
         dryRun: { type: 'boolean', description: 'Preview what would be generated without writing files (default: false)' },
       },
@@ -293,12 +294,19 @@ async function handleGenerateStories(
   argsMap?: Record<string, AiStoryArgs>,
   overwrite?: boolean,
   dryRun?: boolean,
+  ai?: boolean,
 ): Promise<string> {
   const resolvedDir = path.resolve(dir);
   const componentFiles = await findComponents(resolvedDir);
 
   if (componentFiles.length === 0) {
     return `No React components found in ${resolvedDir}`;
+  }
+
+  // Set up AI client if requested and API key is available
+  let aiClient: ReturnType<typeof createAiClient> | undefined;
+  if (ai && process.env.ANTHROPIC_API_KEY) {
+    aiClient = createAiClient();
   }
 
   const project = buildProgram(resolvedDir, componentFiles);
@@ -318,7 +326,22 @@ async function handleGenerateStories(
     }
 
     const relativePath = path.basename(filePath);
-    const aiArgs = argsMap?.[meta.name];
+    let aiArgs = argsMap?.[meta.name];
+
+    // Generate AI args if --ai flag is set and no custom args were provided
+    if (!aiArgs && (aiClient || ai)) {
+      const projectContext = await scanProjectContext(resolvedDir, meta.name);
+      if (aiClient) {
+        try {
+          aiArgs = await generateAiArgs(meta, aiClient, projectContext);
+        } catch {
+          aiArgs = generateHeuristicArgs(meta, projectContext);
+        }
+      } else {
+        aiArgs = generateHeuristicArgs(meta, projectContext);
+      }
+    }
+
     const content = buildStoryContent(meta, relativePath, { aiArgs });
 
     if (dryRun) {
@@ -427,6 +450,7 @@ export async function startMcpServer(version: string): Promise<void> {
             input.args as Record<string, AiStoryArgs> | undefined,
             input.overwrite as boolean | undefined,
             input.dryRun as boolean | undefined,
+            input.ai as boolean | undefined,
           );
           break;
         default:
