@@ -11,6 +11,7 @@ import { logger } from '../../utils/logger.js';
 import { type TypeErrorInfo, findTsconfig, parseTscOutput } from '../../utils/typecheck.js';
 import { generateAiArgs, createAiClient } from '../../ai/argGenerator.js';
 import { generateHeuristicArgs } from '../../ai/heuristicGenerator.js';
+import { scanProjectContext } from '../../mcp/contextScanner.js';
 import type Anthropic from '@anthropic-ai/sdk';
 
 export interface GenerateOptions {
@@ -78,11 +79,12 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
 
       // Generate AI args if enabled
       let aiArgs;
-      if (meta.props.length > 0) {
+      if (meta.props.length > 0 && (aiClient || useHeuristic)) {
+        const projectContext = await scanProjectContext(resolvedDir, meta.name);
         if (aiClient) {
-          aiArgs = await generateAiArgs(meta, aiClient);
-        } else if (useHeuristic) {
-          aiArgs = generateHeuristicArgs(meta);
+          aiArgs = await generateAiArgs(meta, aiClient, projectContext);
+        } else {
+          aiArgs = generateHeuristicArgs(meta, projectContext);
         }
       }
 

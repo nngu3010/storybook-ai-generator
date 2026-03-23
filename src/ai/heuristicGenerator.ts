@@ -1,23 +1,28 @@
 import type { ComponentMeta, PropMeta } from '../parser/componentParser.js';
-import { getDefaultArg, isComponentTypeProp, type ComponentRef } from '../mapper/typeMapper.js';
+import { getDefaultArg, isComponentTypeProp, isReactNodeType, type ComponentRef } from '../mapper/typeMapper.js';
 import { detectVariantProp, generateVariantStories } from '../mapper/variantDetector.js';
 import type { AiStoryArgs } from './argGenerator.js';
+import type { ProjectContext } from '../mcp/contextScanner.js';
+import { extractArgsFromUsages, type ExtractedUsageArgs } from './usageExtractor.js';
 
 /**
  * Generates realistic arg values using keyword heuristics — no API key needed.
  * Analyses component name, prop names, JSDoc descriptions, and types to pick
  * semantically appropriate values.
  */
-export function generateHeuristicArgs(meta: ComponentMeta): AiStoryArgs {
+export function generateHeuristicArgs(meta: ComponentMeta, projectContext?: ProjectContext): AiStoryArgs {
   const variantProp = detectVariantProp(meta.props);
   const variantStories = variantProp ? generateVariantStories(variantProp) : [];
 
   const context = inferContext(meta.name);
+  const extracted = projectContext
+    ? extractArgsFromUsages(projectContext.componentUsages, meta.props)
+    : {};
   const defaultArgs: Record<string, unknown> = {};
 
   for (const prop of meta.props) {
     if (isFunctionProp(prop.typeName)) continue;
-    defaultArgs[prop.name] = inferValue(prop, context, 0);
+    defaultArgs[prop.name] = inferValue(prop, context, 0, extracted);
   }
 
   const variants: Record<string, Record<string, unknown>> = {};
@@ -29,7 +34,7 @@ export function generateHeuristicArgs(meta: ComponentMeta): AiStoryArgs {
       if (prop.name === variantProp!.name) {
         variantArgs[prop.name] = vs.value;
       } else {
-        variantArgs[prop.name] = inferValue(prop, context, i + 1);
+        variantArgs[prop.name] = inferValue(prop, context, i + 1, extracted);
       }
     }
     variants[vs.name] = variantArgs;
@@ -73,10 +78,21 @@ function inferContext(componentName: string): ComponentContext {
 // Value inference from prop name + type + context
 // ---------------------------------------------------------------------------
 
-function inferValue(prop: PropMeta, context: ComponentContext, variantIndex: number): unknown {
+function inferValue(prop: PropMeta, context: ComponentContext, variantIndex: number, extracted: ExtractedUsageArgs = {}): unknown {
+  // Priority: real values extracted from codebase usage
+  const usageValues = extracted[prop.name];
+  if (usageValues && usageValues.length > 0) {
+    return coerceUsageValue(usageValues[variantIndex % usageValues.length], prop.typeName);
+  }
+
   // Component-type props (LucideIcon, ComponentType, etc.) → return a safe default component ref
   if (isComponentTypeProp(prop.typeName)) {
     return inferComponentRef(prop);
+  }
+
+  // ReactNode-like props (children, header, footer, etc.) → return context-aware string content
+  if (isReactNodeType(stripNullable(prop.typeName))) {
+    return inferChildrenValue(prop.name, context, variantIndex);
   }
 
   // If prop has a real default value, use it — but skip empty arrays/objects
@@ -317,6 +333,92 @@ function inferArrayValue(prop: PropMeta, context: ComponentContext): unknown[] {
 }
 
 // ---------------------------------------------------------------------------
+// ReactNode / children inference
+// ---------------------------------------------------------------------------
+
+/** Context-aware children content by prop name and component context. */
+function inferChildrenValue(propName: string, context: ComponentContext, variantIndex: number): string {
+  const name = propName.toLowerCase();
+
+  // Prop-name-specific content (non-children ReactNode slots)
+  if (name === 'header' || name === 'title') {
+    return CHILDREN_BY_CONTEXT[context]?.header?.[variantIndex % 4]
+      ?? ['Section Title', 'Overview', 'Details', 'Summary'][variantIndex % 4];
+  }
+  if (name === 'footer') {
+    return CHILDREN_BY_CONTEXT[context]?.footer?.[variantIndex % 4]
+      ?? ['View all', 'Learn more', 'See details', 'Read more'][variantIndex % 4];
+  }
+  if (name === 'label') {
+    return ['Save changes', 'Submit', 'Continue', 'Get started'][variantIndex % 4];
+  }
+  if (name === 'icon' || name === 'prefix' || name === 'suffix') {
+    return ['★', '→', '•', '✓'][variantIndex % 4];
+  }
+  if (name === 'description' || name === 'subtitle' || name === 'subheading') {
+    return CHILDREN_BY_CONTEXT[context]?.description?.[variantIndex % 4]
+      ?? ['A brief description of this item.', 'More details about this section.', 'Additional information here.', 'Summary of the content below.'][variantIndex % 4];
+  }
+
+  // Default: "children" prop or any other ReactNode prop — use context-aware body content
+  return CHILDREN_BY_CONTEXT[context]?.body?.[variantIndex % 4]
+    ?? ['Content goes here', 'Sample content for preview', 'Example text', 'Placeholder content'][variantIndex % 4];
+}
+
+const CHILDREN_BY_CONTEXT: Record<string, { body?: string[]; header?: string[]; footer?: string[]; description?: string[] }> = {
+  button: {
+    body: ['Save changes', 'Submit', 'Continue', 'Get started'],
+  },
+  card: {
+    body: ['This is a sample card with some descriptive content about the item.', 'A brief overview of the featured content and key details.', 'Explore this item to learn more about what it offers.', 'Key highlights and important information at a glance.'],
+    header: ['Featured Item', 'Product Details', 'Quick Overview', 'Highlights'],
+    footer: ['View details', 'Learn more', 'See all', 'Read more'],
+    description: ['A short summary of the card content.', 'Key details and highlights.', 'Everything you need to know.', 'Quick overview of this item.'],
+  },
+  modal: {
+    body: ['Are you sure you want to proceed? This action cannot be undone.', 'Please review the details below before confirming.', 'Enter your information to continue.', 'Select an option to proceed with your request.'],
+    header: ['Confirm Action', 'Edit Details', 'Create New Item', 'Delete Item'],
+    footer: ['Cancel', 'Confirm', 'Save', 'Close'],
+  },
+  alert: {
+    body: ['Your changes have been saved successfully.', 'Something went wrong. Please try again later.', 'Please review the highlighted fields before submitting.', 'Your session will expire in 5 minutes.'],
+  },
+  badge: {
+    body: ['New', 'Popular', 'Sale', 'Featured'],
+  },
+  nav: {
+    body: ['Home', 'Products', 'About', 'Contact'],
+  },
+  hero: {
+    body: ['Discover amazing products curated just for you. Start exploring today.', 'The best deals on premium items, delivered to your door.', 'Join thousands of happy customers. Shop now and save big.', 'Your one-stop shop for everything you need.'],
+    header: ['Welcome to Our Store', 'Discover Amazing Deals', 'Shop the Latest Collection', 'Free Delivery on All Orders'],
+    description: ['Find everything you need in one place.', 'Curated collections for every occasion.', 'Quality products at unbeatable prices.', 'New arrivals added daily.'],
+  },
+  banner: {
+    body: ['Limited time offer — save up to 50% on selected items!', 'Free shipping on all orders over $50.', 'New arrivals just dropped. Check them out!', 'Sign up today and get 20% off your first order.'],
+  },
+  product: {
+    body: ['Fresh, organic, and locally sourced. Perfect for your daily meals.', 'Premium quality at an affordable price.', 'Our bestselling item — loved by thousands of customers.', 'Sustainably sourced and naturally delicious.'],
+    description: ['100% organic and fresh', 'Premium quality product', 'Customer favorite', 'Sustainably sourced'],
+  },
+  input: {
+    body: ['Enter your details', 'Type here...', 'Add your input', 'Fill in this field'],
+  },
+  table: {
+    body: ['No data available. Try adjusting your filters.', 'Loading results...', 'Showing 1–10 of 42 results', 'Select rows to perform actions.'],
+  },
+  faq: {
+    body: ['Click on a question to expand the answer.', 'Browse our frequently asked questions below.', 'Can\'t find what you\'re looking for? Contact us.', 'Updated answers to common questions.'],
+  },
+  generic: {
+    body: ['Content goes here', 'Sample content for preview', 'Example text for this component', 'Placeholder content'],
+    header: ['Section Title', 'Overview', 'Details', 'Summary'],
+    footer: ['View all', 'Learn more', 'See details', 'Read more'],
+    description: ['A brief description of this item.', 'More details about this section.', 'Additional information here.', 'Summary of the content below.'],
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -341,6 +443,9 @@ export function categorizeHint(prop: PropMeta, componentName: string): string | 
 
   // Component type props
   if (isComponentTypeProp(clean)) return 'component_ref';
+
+  // ReactNode-like props (children, render slots)
+  if (isReactNodeType(clean)) return 'react_node';
 
   // Boolean categories
   if (clean === 'boolean') {
@@ -461,6 +566,21 @@ function inferComponentRef(prop: PropMeta): ComponentRef {
 
   // Generic ComponentType / FC / ElementType — use a safe lucide icon as fallback
   return { __componentRef: true, importName: 'Circle', importSource: 'lucide-react' };
+}
+
+/** Coerce a string extracted from JSX usage to the prop's expected type. */
+function coerceUsageValue(value: string, typeName: string): unknown {
+  const clean = stripNullable(typeName);
+  if (clean === 'number') {
+    const num = Number(value);
+    return Number.isNaN(num) ? value : num;
+  }
+  if (clean === 'boolean') {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return value;
+  }
+  return value;
 }
 
 function stripNullable(typeName: string): string {

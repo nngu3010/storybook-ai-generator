@@ -247,8 +247,8 @@ describe('getDefaultArg', () => {
     expect(getDefaultArg(makeProp({ typeName: "'primary' | 'secondary' | 'danger'" }))).toBe('primary');
   });
 
-  it('returns undefined for ReactNode', () => {
-    expect(getDefaultArg(makeProp({ typeName: 'React.ReactNode' }))).toBeUndefined();
+  it('returns placeholder string for ReactNode', () => {
+    expect(getDefaultArg(makeProp({ typeName: 'React.ReactNode' }))).toBe('Content goes here');
   });
 
   it('uses explicit defaultValue over type inference', () => {

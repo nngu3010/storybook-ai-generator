@@ -274,7 +274,9 @@ async function handleSuggestArgs(dir: string, name: string): Promise<string> {
 
   if ('error' in meta) return meta.error;
 
-  const suggestedArgs = generateHeuristicArgs(meta);
+  const resolvedDir = path.resolve(dir);
+  const projectContext = await scanProjectContext(resolvedDir, meta.name);
+  const suggestedArgs = generateHeuristicArgs(meta, projectContext);
 
   return JSON.stringify({ component: meta.name, suggestedArgs }, null, 2);
 }

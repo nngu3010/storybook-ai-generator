@@ -4,6 +4,7 @@ import { generateHeuristicArgs } from '../src/ai/heuristicGenerator.js';
 import { isComponentRef } from '../src/mapper/typeMapper.js';
 import type { ComponentMeta } from '../src/parser/componentParser.js';
 import type { AiStoryArgs } from '../src/ai/argGenerator.js';
+import type { ProjectContext } from '../src/mcp/contextScanner.js';
 
 // ---------------------------------------------------------------------------
 // storyBuilder integration: verify AI args are used when provided
@@ -416,5 +417,92 @@ describe('heuristic generator with component-type props', () => {
 
     expect(typeof result.Default.title).toBe('string');
     expect(typeof result.Default.value).toBe('number');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Context-enriched heuristic generation
+// ---------------------------------------------------------------------------
+
+describe('context-enriched heuristic generation', () => {
+  const cardMeta: ComponentMeta = {
+    name: 'StatsCard',
+    filePath: '/src/components/StatsCard.tsx',
+    props: [
+      { name: 'title', typeName: 'string', required: true },
+      { name: 'value', typeName: 'number', required: true },
+      { name: 'trend', typeName: 'string', required: false },
+    ],
+  };
+
+  function makeContext(snippets: string[]): ProjectContext {
+    return {
+      componentUsages: [{ file: 'Dashboard.tsx', snippets }],
+      mockDataFiles: [],
+      designTokenFiles: [],
+      storybookConfig: {},
+    };
+  }
+
+  it('uses real string values from project usage', () => {
+    const ctx = makeContext(['<StatsCard title="Total Revenue" value={50000} />']);
+    const result = generateHeuristicArgs(cardMeta, ctx);
+    expect(result.Default.title).toBe('Total Revenue');
+  });
+
+  it('coerces extracted number values', () => {
+    const ctx = makeContext(['<StatsCard title="Users" value={1234} />']);
+    const result = generateHeuristicArgs(cardMeta, ctx);
+    expect(result.Default.value).toBe(1234);
+  });
+
+  it('cycles through extracted values for variants', () => {
+    const metaWithVariant: ComponentMeta = {
+      name: 'StatsCard',
+      filePath: '/src/components/StatsCard.tsx',
+      props: [
+        { name: 'title', typeName: 'string', required: true },
+        { name: 'value', typeName: 'number', required: true },
+        { name: 'size', typeName: "'sm' | 'md' | 'lg'", required: false },
+      ],
+    };
+    const ctx = makeContext([
+      '<StatsCard title="Revenue" value={100} />',
+      '<StatsCard title="Active Users" value={42} />',
+    ]);
+    const result = generateHeuristicArgs(metaWithVariant, ctx);
+
+    // Default uses first extracted value, variants cycle
+    expect(result.Default.title).toBe('Revenue');
+    // Variant stories should use the cycling mechanism
+    const variantTitles = Object.values(result.variants).map((v) => v.title);
+    expect(variantTitles.some((t) => t === 'Active Users')).toBe(true);
+  });
+
+  it('falls back to heuristics when no context provided', () => {
+    const result = generateHeuristicArgs(cardMeta);
+    // Should still work — just uses pattern-based defaults
+    expect(typeof result.Default.title).toBe('string');
+    expect(typeof result.Default.value).toBe('number');
+  });
+
+  it('falls back to heuristics for props not found in usage', () => {
+    const ctx = makeContext(['<StatsCard title="Revenue" value={100} />']);
+    const result = generateHeuristicArgs(cardMeta, ctx);
+    // trend is not in the usage snippet, should fall back to heuristic
+    expect(result.Default.title).toBe('Revenue');
+    // trend should still get a value from heuristics (or be undefined if optional)
+    // The key point: it doesn't crash
+  });
+
+  it('handles empty usages gracefully', () => {
+    const ctx: ProjectContext = {
+      componentUsages: [],
+      mockDataFiles: [],
+      designTokenFiles: [],
+      storybookConfig: {},
+    };
+    const result = generateHeuristicArgs(cardMeta, ctx);
+    expect(typeof result.Default.title).toBe('string');
   });
 });

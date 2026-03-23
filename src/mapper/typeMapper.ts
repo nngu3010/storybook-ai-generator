@@ -34,6 +34,15 @@ export function isComponentTypeProp(typeName: string): boolean {
 }
 
 /**
+ * Returns true if the type string represents a ReactNode-like type that can accept children.
+ * Matches: ReactNode, ReactElement, ReactChild, JSX.Element, React.ReactNode, etc.
+ */
+export function isReactNodeType(typeName: string): boolean {
+  const clean = stripNullable(typeName);
+  return /\bReact\.(ReactNode|ReactElement|ReactChild)\b|\bReactNode\b|\bReactElement\b|\bReactChild\b|\bJSX\.Element\b/.test(clean);
+}
+
+/**
  * Maps a parsed PropMeta to a Storybook ArgType definition.
  */
 export function mapPropToArgType(prop: PropMeta): ArgTypeMeta {
@@ -74,6 +83,9 @@ export function getDefaultArg(prop: PropMeta): unknown {
   }
 
   const clean = stripNullable(prop.typeName);
+
+  // ReactNode-like props — return a placeholder string (CSF3 passes it as children)
+  if (isReactNodeType(clean)) return 'Content goes here';
 
   if (clean === 'string') return '';
   if (clean === 'number') return 0;

@@ -3,6 +3,7 @@ import type { ComponentMeta, PropMeta } from '../parser/componentParser.js';
 import { getDefaultArg } from '../mapper/typeMapper.js';
 import { detectVariantProp, generateVariantStories } from '../mapper/variantDetector.js';
 import { logger } from '../utils/logger.js';
+import type { ProjectContext } from '../mcp/contextScanner.js';
 
 export interface AiStoryArgs {
   /** Args for the Default story */
@@ -18,6 +19,7 @@ export interface AiStoryArgs {
 export async function generateAiArgs(
   meta: ComponentMeta,
   client: Anthropic,
+  projectContext?: ProjectContext,
 ): Promise<AiStoryArgs> {
   const variantProp = detectVariantProp(meta.props);
   const variantStories = variantProp ? generateVariantStories(variantProp) : [];
@@ -32,7 +34,7 @@ export async function generateAiArgs(
 
   const storyNames = ['Default', ...variantStories.map((v) => v.name)];
 
-  const prompt = buildPrompt(meta.name, propDescriptions, storyNames, variantProp ?? null);
+  const prompt = buildPrompt(meta.name, propDescriptions, storyNames, variantProp ?? null, projectContext);
 
   try {
     const response = await client.messages.create({
@@ -65,6 +67,7 @@ function buildPrompt(
   props: Array<{ name: string; type: string; required: boolean; description: string; defaultValue?: string }>,
   storyNames: string[],
   variantProp: PropMeta | null,
+  projectContext?: ProjectContext,
 ): string {
   const propsTable = props
     .filter((p) => !isFunctionProp(p.type))
@@ -77,6 +80,18 @@ function buildPrompt(
     })
     .join('\n');
 
+  let contextSection = '';
+  if (projectContext?.componentUsages?.length) {
+    const snippets = projectContext.componentUsages
+      .flatMap((u) => u.snippets)
+      .slice(0, 5)
+      .join('\n');
+    contextSection = `
+Here are real usages of this component found in the codebase — use similar values:
+${snippets}
+`;
+  }
+
   return `You are generating realistic example args for a React component's Storybook stories.
 
 Component: ${componentName}
@@ -85,11 +100,12 @@ ${propsTable}
 
 Stories to generate args for: ${storyNames.join(', ')}
 ${variantProp ? `The variant prop is "${variantProp.name}" — each variant story should use a different value for this prop.` : ''}
-
+${contextSection}
 Rules:
 - Return ONLY a JSON object, no markdown fences, no explanation
 - Keys are story names, values are objects with prop names as keys
 - Use realistic, meaningful values that demonstrate the component's purpose
+- Prefer values from the real usage examples above when available
 - Strings should be realistic content (e.g. "Save changes" for a button label, "John Doe" for a user name)
 - Numbers should be plausible (e.g. 42 for a count, 4.5 for a rating)
 - Booleans should vary across stories to show different states
