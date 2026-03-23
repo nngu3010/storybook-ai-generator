@@ -86,9 +86,19 @@ function buildPrompt(
       .flatMap((u) => u.snippets)
       .slice(0, 5)
       .join('\n');
-    contextSection = `
+    contextSection += `
 Here are real usages of this component found in the codebase — use similar values:
 ${snippets}
+`;
+  }
+  if (projectContext?.mockDataFiles?.length) {
+    const dataPreviews = projectContext.mockDataFiles
+      .slice(0, 3)
+      .map((f) => `// ${f.file}\n${f.preview.slice(0, 500)}`)
+      .join('\n\n');
+    contextSection += `
+Here are data/mock files from the project — use realistic values that match this data:
+${dataPreviews}
 `;
   }
 

@@ -11,8 +11,8 @@ export interface ProjectContext {
 
 const MAX_USAGE_FILES = 5;
 const MAX_USAGES_PER_FILE = 3;
-const MAX_MOCK_FILES = 5;
-const MAX_MOCK_LINES = 50;
+const MAX_MOCK_FILES = 8;
+const MAX_MOCK_LINES = 80;
 const MAX_TOKEN_FILES = 3;
 const MAX_TOKEN_LINES = 30;
 const MAX_OUTPUT_CHARS = 4000;
@@ -111,6 +111,14 @@ async function findMockDataFiles(
     '**/fixture*',
     '**/seed*',
     '**/__mocks__/**',
+    '**/data.{ts,tsx,js,jsx,json}',
+    '**/constants.{ts,tsx,js,jsx}',
+    '**/*slice.{ts,tsx,js,jsx}',
+    '**/*Slice.{ts,tsx,js,jsx}',
+    '**/*store.{ts,tsx,js,jsx}',
+    '**/*Store.{ts,tsx,js,jsx}',
+    '**/*state.{ts,tsx,js,jsx}',
+    '**/*State.{ts,tsx,js,jsx}',
   ];
 
   const results: Array<{ file: string; preview: string }> = [];

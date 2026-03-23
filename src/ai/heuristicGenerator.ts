@@ -4,6 +4,7 @@ import { detectVariantProp, generateVariantStories } from '../mapper/variantDete
 import type { AiStoryArgs } from './argGenerator.js';
 import type { ProjectContext } from '../mcp/contextScanner.js';
 import { extractArgsFromUsages, type ExtractedUsageArgs } from './usageExtractor.js';
+import { extractValuesFromDataFiles, mergeExtracted } from './dataExtractor.js';
 
 /**
  * Generates realistic arg values using keyword heuristics — no API key needed.
@@ -15,9 +16,13 @@ export function generateHeuristicArgs(meta: ComponentMeta, projectContext?: Proj
   const variantStories = variantProp ? generateVariantStories(variantProp) : [];
 
   const context = inferContext(meta.name);
-  const extracted = projectContext
+  const fromUsage = projectContext
     ? extractArgsFromUsages(projectContext.componentUsages, meta.props)
     : {};
+  const fromData = projectContext
+    ? extractValuesFromDataFiles(projectContext.mockDataFiles, meta.props)
+    : {};
+  const extracted = mergeExtracted(fromUsage, fromData);
   const defaultArgs: Record<string, unknown> = {};
 
   for (const prop of meta.props) {
