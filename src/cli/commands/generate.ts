@@ -6,7 +6,7 @@ import { findComponents } from '../../detector/componentFinder.js';
 import { buildProgram } from '../../parser/programBuilder.js';
 import { parseComponent } from '../../parser/componentParser.js';
 import { buildStoryContent } from '../../generator/storyBuilder.js';
-import { writeStory } from '../../generator/storyWriter.js';
+import { writeStory, computeStoryPath, computeImportPath } from '../../generator/storyWriter.js';
 import { logger } from '../../utils/logger.js';
 import { type TypeErrorInfo, findTsconfig, parseTscOutput } from '../../utils/typecheck.js';
 import { generateAiArgs, createAiClient } from '../../ai/argGenerator.js';
@@ -18,11 +18,14 @@ export interface GenerateOptions {
   dryRun?: boolean;
   check?: boolean;
   ai?: boolean;
+  outputDir?: string;
 }
 
 export async function runGenerate(dir: string, opts: GenerateOptions = {}): Promise<void> {
   const resolvedDir = path.resolve(dir);
+  const resolvedOutputDir = opts.outputDir ? path.resolve(opts.outputDir) : undefined;
   logger.info(`Scanning for components in: ${resolvedDir}`);
+  if (resolvedOutputDir) logger.info(`Output directory: ${resolvedOutputDir}`);
 
   // Step 1: Discover component files
   const componentFiles = await findComponents(resolvedDir);
@@ -42,7 +45,7 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
 
   // --check mode: generate to temp dir, validate, then exit
   if (opts.check) {
-    await runCheckMode(resolvedDir, componentFiles, project);
+    await runCheckMode(resolvedDir, componentFiles, project, resolvedOutputDir);
     return;
   }
 
@@ -70,7 +73,8 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
         continue;
       }
 
-      const relativePath = path.relative(path.dirname(filePath), filePath);
+      const storyOutputPath = computeStoryPath(filePath, resolvedDir, resolvedOutputDir);
+      const importRelPath = computeImportPath(storyOutputPath, filePath);
 
       // Generate AI args if enabled
       let aiArgs;
@@ -82,7 +86,7 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
         }
       }
 
-      const content = buildStoryContent(meta, relativePath, { aiArgs });
+      const content = buildStoryContent(meta, importRelPath, { aiArgs });
 
       if (opts.dryRun) {
         logger.info(`[dry-run] Would write story for ${meta.name}`);
@@ -90,7 +94,7 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
         continue;
       }
 
-      const result = writeStory(filePath, content, { overwrite: opts.overwrite });
+      const result = writeStory(filePath, content, { overwrite: opts.overwrite, outputPath: resolvedOutputDir ? storyOutputPath : undefined });
 
       switch (result) {
         case 'written':
@@ -129,6 +133,7 @@ async function runCheckMode(
   resolvedDir: string,
   componentFiles: string[],
   project: ReturnType<typeof buildProgram>,
+  resolvedOutputDir?: string,
 ): Promise<void> {
   logger.info('[check] Validating stories without writing to disk...');
 
@@ -144,8 +149,9 @@ async function runCheckMode(
         continue;
       }
 
-      const relativePath = path.relative(path.dirname(filePath), filePath);
-      const content = buildStoryContent(meta, relativePath);
+      const storyOutputPath = computeStoryPath(filePath, resolvedDir, resolvedOutputDir);
+      const importRelPath = computeImportPath(storyOutputPath, filePath);
+      const content = buildStoryContent(meta, importRelPath);
 
       // Validate structure
       const errors = validateStoryContent(content, meta.name);
@@ -159,8 +165,7 @@ async function runCheckMode(
       }
 
       // Check if existing story is outdated
-      const baseName = path.basename(filePath).replace(/\.(tsx?|jsx?)$/, '');
-      const existingStoryPath = path.join(path.dirname(filePath), `${baseName}.stories.ts`);
+      const existingStoryPath = storyOutputPath;
       if (fs.existsSync(existingStoryPath)) {
         const existing = fs.readFileSync(existingStoryPath, 'utf-8');
         const existingChecksum = existing.match(/checksum: ([a-f0-9]+)/)?.[1];

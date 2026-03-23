@@ -27,7 +27,8 @@ program
   .option('--dry-run', 'Preview what would be generated without writing files', false)
   .option('--check', 'Generate and verify stories without writing (CI-safe)', false)
   .option('--ai', 'Use Claude AI to generate realistic, semantic arg values', false)
-  .action(async (dir: string | undefined, opts: { overwrite: boolean; dryRun: boolean; check: boolean; ai: boolean }) => {
+  .option('--output-dir <path>', 'Write stories to a centralized directory mirroring source structure')
+  .action(async (dir: string | undefined, opts: { overwrite: boolean; dryRun: boolean; check: boolean; ai: boolean; outputDir?: string }) => {
     await runGenerate(dir ?? '.', opts);
   });
 
@@ -35,7 +36,8 @@ program
   .command('verify [dir]')
   .description('Verify generated stories are in sync and valid (defaults to current directory)')
   .option('--typecheck', 'Also run TypeScript validation on generated stories', false)
-  .action(async (dir: string | undefined, opts: { typecheck: boolean }) => {
+  .option('--output-dir <path>', 'Look for stories in a centralized directory mirroring source structure')
+  .action(async (dir: string | undefined, opts: { typecheck: boolean; outputDir?: string }) => {
     const exitCode = await runVerify(dir ?? '.', opts);
     process.exit(exitCode);
   });
@@ -52,7 +54,8 @@ program
   .command('watch [dir]')
   .description('Watch a directory for component changes and auto-generate stories (defaults to current directory)')
   .option('--overwrite', 'Overwrite existing story files', false)
-  .action(async (dir: string | undefined, opts: { overwrite: boolean }) => {
+  .option('--output-dir <path>', 'Write stories to a centralized directory mirroring source structure')
+  .action(async (dir: string | undefined, opts: { overwrite: boolean; outputDir?: string }) => {
     await runWatch(dir ?? '.', opts);
   });
 

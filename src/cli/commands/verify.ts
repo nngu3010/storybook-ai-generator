@@ -5,11 +5,13 @@ import { findComponents } from '../../detector/componentFinder.js';
 import { buildProgram } from '../../parser/programBuilder.js';
 import { parseComponent } from '../../parser/componentParser.js';
 import { buildStoryContent } from '../../generator/storyBuilder.js';
+import { computeStoryPath, computeImportPath } from '../../generator/storyWriter.js';
 import { logger } from '../../utils/logger.js';
 import { type TypeErrorInfo, findTsconfig, parseTscOutput } from '../../utils/typecheck.js';
 
 export interface VerifyOptions {
   typecheck?: boolean;
+  outputDir?: string;
 }
 
 interface VerifyResult {
@@ -27,6 +29,7 @@ interface VerifyResult {
  */
 export async function runVerify(dir: string, opts: VerifyOptions = {}): Promise<number> {
   const resolvedDir = path.resolve(dir);
+  const resolvedOutputDir = opts.outputDir ? path.resolve(opts.outputDir) : undefined;
   logger.info(`Verifying stories in: ${resolvedDir}`);
 
   const componentFiles = await findComponents(resolvedDir);
@@ -45,8 +48,7 @@ export async function runVerify(dir: string, opts: VerifyOptions = {}): Promise<
     if (meta.skipReason) continue;
 
     result.total++;
-    const baseName = path.basename(filePath).replace(/\.(tsx?|jsx?)$/, '');
-    const storyPath = path.join(path.dirname(filePath), `${baseName}.stories.ts`);
+    const storyPath = computeStoryPath(filePath, resolvedDir, resolvedOutputDir);
 
     // Check 1: Story file exists
     if (!fs.existsSync(storyPath)) {
@@ -59,7 +61,8 @@ export async function runVerify(dir: string, opts: VerifyOptions = {}): Promise<
     // Check 2: Checksum matches (story is up-to-date with component props)
     const existingContent = fs.readFileSync(storyPath, 'utf-8');
     const existingChecksum = extractChecksum(existingContent);
-    const freshContent = buildStoryContent(meta, path.basename(filePath));
+    const importRelPath = computeImportPath(storyPath, filePath);
+    const freshContent = buildStoryContent(meta, importRelPath);
     const freshChecksum = extractChecksum(freshContent);
 
     if (existingChecksum && freshChecksum && existingChecksum !== freshChecksum) {
@@ -78,7 +81,7 @@ export async function runVerify(dir: string, opts: VerifyOptions = {}): Promise<
   if (opts.typecheck) {
     logger.info('');
     logger.info('Running TypeScript validation on generated stories...');
-    const typeErrors = await typecheckStories(resolvedDir, componentFiles);
+    const typeErrors = await typecheckStories(resolvedDir, componentFiles, resolvedOutputDir);
     result.typeErrors = typeErrors.length;
 
     for (const err of typeErrors) {
@@ -116,12 +119,11 @@ function extractChecksum(content: string): string | null {
   return match ? match[1] : null;
 }
 
-async function typecheckStories(dir: string, componentFiles: string[]): Promise<TypeErrorInfo[]> {
+async function typecheckStories(dir: string, componentFiles: string[], resolvedOutputDir?: string): Promise<TypeErrorInfo[]> {
   // Find all .stories.ts files in the directory
   const storyFiles: string[] = [];
   for (const filePath of componentFiles) {
-    const baseName = path.basename(filePath).replace(/\.(tsx?|jsx?)$/, '');
-    const storyPath = path.join(path.dirname(filePath), `${baseName}.stories.ts`);
+    const storyPath = computeStoryPath(filePath, dir, resolvedOutputDir);
     if (fs.existsSync(storyPath)) {
       storyFiles.push(storyPath);
     }

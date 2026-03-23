@@ -3,7 +3,7 @@ import chokidar from 'chokidar';
 import { buildProgram } from '../../parser/programBuilder.js';
 import { parseComponent } from '../../parser/componentParser.js';
 import { buildStoryContent } from '../../generator/storyBuilder.js';
-import { writeStory } from '../../generator/storyWriter.js';
+import { writeStory, computeStoryPath, computeImportPath } from '../../generator/storyWriter.js';
 import { findComponents } from '../../detector/componentFinder.js';
 import { isComponent } from '../../detector/heuristics.js';
 import fs from 'fs';
@@ -11,10 +11,12 @@ import { logger } from '../../utils/logger.js';
 
 export interface WatchOptions {
   overwrite?: boolean;
+  outputDir?: string;
 }
 
 export async function runWatch(dir: string, opts: WatchOptions = {}): Promise<void> {
   const resolvedDir = path.resolve(dir);
+  const resolvedOutputDir = opts.outputDir ? path.resolve(opts.outputDir) : undefined;
 
   if (!fs.existsSync(resolvedDir)) {
     logger.error(`Directory not found: ${resolvedDir}`);
@@ -50,8 +52,10 @@ export async function runWatch(dir: string, opts: WatchOptions = {}): Promise<vo
         return;
       }
 
-      const storyContent = buildStoryContent(meta, path.basename(filePath));
-      const result = writeStory(filePath, storyContent, { overwrite: opts.overwrite });
+      const storyOutputPath = computeStoryPath(filePath, resolvedDir, resolvedOutputDir);
+      const importRelPath = computeImportPath(storyOutputPath, filePath);
+      const storyContent = buildStoryContent(meta, importRelPath);
+      const result = writeStory(filePath, storyContent, { overwrite: opts.overwrite, outputPath: resolvedOutputDir ? storyOutputPath : undefined });
 
       switch (result) {
         case 'written':
@@ -94,8 +98,8 @@ export async function runWatch(dir: string, opts: WatchOptions = {}): Promise<vo
     })
     .on('unlink', (rel) => {
       const filePath = path.join(resolvedDir, rel);
+      const storyPath = computeStoryPath(filePath, resolvedDir, resolvedOutputDir);
       const baseName = path.basename(filePath).replace(/\.(tsx?|jsx?)$/, '');
-      const storyPath = path.join(path.dirname(filePath), `${baseName}.stories.ts`);
       if (fs.existsSync(storyPath)) {
         fs.unlinkSync(storyPath);
         logger.warn(`[watch] Deleted story for removed component: ${baseName}.stories.ts`);

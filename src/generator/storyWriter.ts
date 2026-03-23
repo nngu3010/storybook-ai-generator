@@ -6,6 +6,43 @@ export type WriteResult = 'written' | 'skipped' | 'conflict';
 
 export interface WriteOptions {
   overwrite?: boolean;
+  /** Explicit output path — overrides the default co-located story path. */
+  outputPath?: string;
+}
+
+/**
+ * Computes the story output path for a component.
+ * With `outputDir`, mirrors the source structure under the output directory.
+ * Without it, returns the co-located path next to the component.
+ */
+export function computeStoryPath(
+  componentPath: string,
+  scanDir: string,
+  outputDir?: string,
+): string {
+  const baseName = path.basename(componentPath).replace(/\.(tsx?|jsx?)$/, '');
+  const storyFileName = `${baseName}.stories.ts`;
+
+  if (!outputDir) {
+    return path.join(path.dirname(componentPath), storyFileName);
+  }
+
+  const relativeFromScan = path.relative(scanDir, componentPath);
+  return path.join(outputDir, path.dirname(relativeFromScan), storyFileName);
+}
+
+/**
+ * Computes the import path from a story file back to its source component.
+ * Returns a relative path without extension, suitable for a TS import statement.
+ */
+export function computeImportPath(
+  storyPath: string,
+  componentPath: string,
+): string {
+  const rel = path.relative(path.dirname(storyPath), componentPath);
+  const withoutExt = rel.replace(/\.(tsx?|jsx?)$/, '');
+  if (!withoutExt.startsWith('.')) return `./${withoutExt}`;
+  return withoutExt;
 }
 
 /**
@@ -22,11 +59,12 @@ export function writeStory(
   content: string,
   opts: WriteOptions = {}
 ): WriteResult {
-  const dir = path.dirname(componentPath);
   const baseName = path.basename(componentPath).replace(/\.(tsx?|jsx?)$/, '');
-  const storyPath = path.join(dir, `${baseName}.stories.ts`);
+  const storyPath = opts.outputPath ?? path.join(path.dirname(componentPath), `${baseName}.stories.ts`);
+  const dir = path.dirname(storyPath);
 
   if (!fs.existsSync(storyPath)) {
+    fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(storyPath, content, 'utf-8');
     return 'written';
   }
@@ -46,7 +84,7 @@ export function writeStory(
   }
 
   // Write to a .generated.ts file to avoid clobbering manual edits
-  const conflictPath = path.join(dir, `${baseName}.stories.generated.ts`);
+  const conflictPath = path.join(path.dirname(storyPath), `${baseName}.stories.generated.ts`);
   fs.writeFileSync(conflictPath, content, 'utf-8');
   return 'conflict';
 }
