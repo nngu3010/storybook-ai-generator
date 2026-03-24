@@ -12,6 +12,7 @@ import { type TypeErrorInfo, findTsconfig, parseTscOutput } from '../../utils/ty
 import { generateAiArgs, createAiClient } from '../../ai/argGenerator.js';
 import { generateHeuristicArgs } from '../../ai/heuristicGenerator.js';
 import { scanProjectContext } from '../../mcp/contextScanner.js';
+import { scanRequiredDecorators } from '../../detector/providerScanner.js';
 import type Anthropic from '@anthropic-ai/sdk';
 
 export interface GenerateOptions {
@@ -88,7 +89,10 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
         }
       }
 
-      const content = buildStoryContent(meta, importRelPath, { aiArgs });
+      // Detect provider dependencies for per-story decorators
+      const decorators = scanRequiredDecorators(filePath);
+
+      const content = buildStoryContent(meta, importRelPath, { aiArgs, decorators });
 
       if (opts.dryRun) {
         logger.info(`[dry-run] Would write story for ${meta.name}`);

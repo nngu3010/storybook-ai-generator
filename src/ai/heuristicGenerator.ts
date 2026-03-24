@@ -122,8 +122,16 @@ function inferValue(prop: PropMeta, context: ComponentContext, variantIndex: num
     return inferArrayValue(prop, context);
   }
 
-  // Record / object types
-  if (/^Record</.test(clean) || /^\{/.test(clean)) return {};
+  // Record / object types — generate meaningful sample data based on prop name
+  if (/^Record</.test(clean) || /^\{/.test(clean)) {
+    return inferObjectValue(prop, context);
+  }
+
+  // Named interface/type references (not primitive, not union, not array)
+  // These are complex object types like StoreInfo, BannerData, etc.
+  if (isNamedObjectType(clean)) {
+    return inferObjectValue(prop, context);
+  }
 
   // Boolean
   if (clean === 'boolean') {
@@ -604,4 +612,126 @@ function extractStringLiterals(typeName: string): string[] {
     if (match) literals.push(match[1]);
   }
   return literals;
+}
+
+// ---------------------------------------------------------------------------
+// Object/interface inference
+// ---------------------------------------------------------------------------
+
+/**
+ * Checks if a type name represents a named object type (interface/type alias)
+ * rather than a primitive, union, array, or function.
+ */
+function isNamedObjectType(clean: string): boolean {
+  // Skip primitives, string literal unions, arrays, functions
+  if (['string', 'number', 'boolean', 'any', 'unknown', 'never', 'void', 'null', 'undefined'].includes(clean)) return false;
+  if (/^['"]/.test(clean)) return false;  // string literal
+  if (/\[\]$/.test(clean) || /^Array</.test(clean)) return false;
+  if (/^\(/.test(clean)) return false;  // function type
+  if (/^Record</.test(clean) || /^\{/.test(clean)) return false;  // already handled
+  if (clean.includes(' | ') || clean.includes(' & ')) return false;  // unions/intersections
+  if (/^(React\.|JSX\.)/.test(clean)) return false;  // React types
+
+  // Must start with a capital letter (named type) or be an imported identifier
+  return /^[A-Z]/.test(clean);
+}
+
+/**
+ * Generates a meaningful object value for named types and Record/object types.
+ * Uses the prop name and component context to create realistic placeholder data.
+ */
+function inferObjectValue(prop: PropMeta, context: ComponentContext): Record<string, unknown> {
+  const name = prop.name.toLowerCase();
+  const typeName = prop.typeName.toLowerCase();
+
+  // Store / location related
+  if (name.includes('store') || name.includes('location') || name.includes('address')) {
+    return {
+      id: 1,
+      name: 'Downtown Store',
+      address: '123 Main St',
+      city: 'San Francisco',
+      state: 'CA',
+      zip: '94102',
+    };
+  }
+
+  // Product / item related
+  if (name.includes('product') || name.includes('item') || (name === 'data' && (context === 'product' || context === 'cart'))) {
+    return {
+      id: 1,
+      name: 'Organic Avocados',
+      price: 4.99,
+      image: '🥑',
+      category: 'Produce',
+    };
+  }
+
+  // User / customer / account
+  if (name.includes('user') || name.includes('customer') || name.includes('account') || name.includes('profile')) {
+    return {
+      id: 1,
+      name: 'Sarah Johnson',
+      email: 'sarah@example.com',
+    };
+  }
+
+  // Order related
+  if (name.includes('order')) {
+    return {
+      id: 'ORD-001',
+      status: 'delivered',
+      total: 29.97,
+      items: 3,
+    };
+  }
+
+  // Banner / offer / promo
+  if (name.includes('banner') || name.includes('offer') || name.includes('promo')) {
+    return {
+      id: 1,
+      title: 'Limited Time Offer',
+      description: 'Save up to 50% on selected items',
+      imageUrl: 'https://picsum.photos/800/400',
+      link: '/offers',
+    };
+  }
+
+  // Config / options / settings
+  if (name.includes('config') || name.includes('options') || name.includes('settings')) {
+    return {
+      enabled: true,
+      label: 'Default Configuration',
+    };
+  }
+
+  // Schema / structured data
+  if (name.includes('schema') || typeName.includes('schema')) {
+    return {
+      '@type': 'Organization',
+      name: 'Example Store',
+      url: 'https://example.com',
+    };
+  }
+
+  // Feedback / review
+  if (name.includes('feedback') || name.includes('review')) {
+    return {
+      rating: 4.5,
+      comment: 'Great product!',
+      author: 'Sarah J.',
+    };
+  }
+
+  // Generic object — generate based on context
+  switch (context) {
+    case 'cart':
+      return { id: 1, name: 'Cart Item', price: 9.99, quantity: 1 };
+    case 'product':
+      return { id: 1, name: 'Product', price: 9.99, image: '🛒' };
+    case 'user':
+      return { id: 1, name: 'User', email: 'user@example.com' };
+    default:
+      return { id: 1, label: 'Example', value: 'sample' };
+  }
 }

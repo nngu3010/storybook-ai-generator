@@ -4,10 +4,13 @@ import type { ComponentMeta } from '../parser/componentParser.js';
 import { mapPropToArgType, getDefaultArg, isComponentRef, type ArgTypeMeta, type ComponentRef } from '../mapper/typeMapper.js';
 import { detectVariantProp, generateVariantStories } from '../mapper/variantDetector.js';
 import type { AiStoryArgs } from '../ai/argGenerator.js';
+import type { RequiredDecorator } from '../detector/providerScanner.js';
 
 export interface BuildStoryOptions {
   /** AI-generated args to use instead of defaults */
   aiArgs?: AiStoryArgs;
+  /** Detected provider decorators to inject into the story */
+  decorators?: RequiredDecorator[];
 }
 
 /**
@@ -50,6 +53,14 @@ export function buildStoryContent(
   // Imports
   lines.push(`import type { Meta, StoryObj } from '@storybook/react';`);
 
+  // Decorator imports
+  const decorators = options.decorators ?? [];
+  for (const dec of decorators) {
+    for (const imp of dec.imports) {
+      lines.push(imp);
+    }
+  }
+
   // Component ref imports (grouped by source)
   if (componentRefs.length > 0) {
     const refsBySource = new Map<string, string[]>();
@@ -71,6 +82,16 @@ export function buildStoryContent(
   lines.push(`  title: '${title}',`);
   lines.push(`  component: ${meta.name},`);
   lines.push(`  tags: ['autodocs'],`);
+
+  // Decorators
+  if (decorators.length > 0) {
+    lines.push(`  decorators: [`);
+    for (const dec of decorators) {
+      const wrapper = dec.decorator.replace('{children}', '<Story />');
+      lines.push(`    (Story) => (${wrapper}),`);
+    }
+    lines.push(`  ],`);
+  }
 
   if (argTypes.length > 0) {
     lines.push(`  argTypes: {`);
