@@ -94,6 +94,12 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
 
       const content = buildStoryContent(meta, importRelPath, { aiArgs, decorators });
 
+      // Validate generated content before writing
+      const validationErrors = validateStoryContent(content, meta.name);
+      if (validationErrors.length > 0) {
+        logger.warn(`${meta.name}: validation issues detected — ${validationErrors.join('; ')}`);
+      }
+
       if (opts.dryRun) {
         logger.info(`[dry-run] Would write story for ${meta.name}`);
         generated++;

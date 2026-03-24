@@ -123,6 +123,8 @@ export function buildStoryContent(
   const emittedVariantNames = new Set<string>();
   for (const variant of variantStories) {
     const variantName = sanitiseIdentifier(variant.name);
+    // Skip variants that collide with the hardcoded Default story
+    if (variantName === 'Default') continue;
     emittedVariantNames.add(variant.name);
     const aiVariantArgs = options.aiArgs?.variants?.[variant.name];
 

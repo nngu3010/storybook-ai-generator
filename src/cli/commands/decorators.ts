@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs';
 import { detectProviders, type DetectedProvider } from '../../decorators/providerDetector.js';
+import { scanLayoutProviders } from '../../decorators/layoutScanner.js';
 import { generatePreviewContent } from '../../decorators/previewGenerator.js';
 import { logger } from '../../utils/logger.js';
 
@@ -12,8 +13,22 @@ export async function runDecorators(dir: string, opts: DecoratorOptions = {}): P
   const resolvedDir = path.resolve(dir);
   logger.info(`Scanning ${resolvedDir}/package.json for state management libraries...`);
 
-  // Step 1: Detect providers
-  const providers = detectProviders(resolvedDir);
+  // Step 1: Detect providers from package.json
+  const pkgProviders = detectProviders(resolvedDir);
+
+  // Step 1b: Scan layout/app files for custom providers (ModalProvider, etc.)
+  logger.info(`Scanning layout files for custom providers...`);
+  const layoutProviders = scanLayoutProviders(resolvedDir);
+
+  // Merge, deduplicating by label
+  const seenLabels = new Set(pkgProviders.map((p) => p.label));
+  const providers = [...pkgProviders];
+  for (const lp of layoutProviders) {
+    if (!seenLabels.has(lp.label)) {
+      seenLabels.add(lp.label);
+      providers.push(lp);
+    }
+  }
 
   if (providers.length === 0) {
     logger.info('No state management or provider-requiring libraries detected.');
@@ -23,7 +38,8 @@ export async function runDecorators(dir: string, opts: DecoratorOptions = {}): P
 
   logger.info(`Detected ${providers.length} provider(s):`);
   for (const p of providers) {
-    logger.success(`  ${p.label} (${p.library})`);
+    const source = p.library.startsWith('layout:') ? p.library.replace('layout:', '') : p.library;
+    logger.success(`  ${p.label} (${source})`);
   }
   console.log('');
 

@@ -356,7 +356,7 @@ function expandTypeAlias(type: Type, sourceFile: SourceFile): string {
       (t) => t.isStringLiteral() || t.isNumberLiteral() || t.isBooleanLiteral() || t.isUndefined() || t.isNull()
     );
     if (isAllLiterals) {
-      return type.getUnionTypes().map((t) => literalText(t, sourceFile)).join(' | ');
+      return members.map((t) => literalText(t, sourceFile)).join(' | ');
     }
   }
 

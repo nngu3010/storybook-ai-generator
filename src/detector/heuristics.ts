@@ -114,12 +114,22 @@ export function isAsyncServerComponent(content: string): boolean {
   if (/export\s+default\s+async\s+function\b/.test(content)) return true;
   if (/export\s+default\s+async\s*\(/.test(content)) return true;
 
-  // Check for: const Foo = async (...) => ... with export default Foo
-  const asyncConstMatch = content.match(/(?:const|let|var)\s+([A-Z][A-Za-z0-9_]*)\s*=\s*async\s/);
+  // Check for: const Foo = async(...) or async (...) with export default Foo
+  const asyncConstMatch = content.match(/(?:const|let|var)\s+([A-Z][A-Za-z0-9_]*)\s*=\s*async[\s(]/);
   if (asyncConstMatch) {
     const name = asyncConstMatch[1];
-    const exportPattern = new RegExp(`export\\s+default\\s+${name}\\b`);
-    if (exportPattern.test(content)) return true;
+    const exportDefault = new RegExp(`export\\s+default\\s+${name}\\b`);
+    const exportAsDefault = new RegExp(`export\\s*\\{[^}]*\\b${name}\\s+as\\s+default\\b`);
+    if (exportDefault.test(content) || exportAsDefault.test(content)) return true;
+  }
+
+  // Check for: export async function Foo() ... export default Foo
+  const asyncFnMatch = content.match(/export\s+async\s+function\s+([A-Z][A-Za-z0-9_]*)/);
+  if (asyncFnMatch) {
+    const name = asyncFnMatch[1];
+    const exportDefault = new RegExp(`export\\s+default\\s+${name}\\b`);
+    const exportAsDefault = new RegExp(`export\\s*\\{[^}]*\\b${name}\\s+as\\s+default\\b`);
+    if (exportDefault.test(content) || exportAsDefault.test(content)) return true;
   }
 
   return false;
