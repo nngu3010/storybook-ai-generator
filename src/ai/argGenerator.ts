@@ -122,6 +122,8 @@ Rules:
 - For optional props with no default, include them in some stories and omit in others
 - Skip function/callback props (onClick, onChange, etc.)
 - Keep string values concise (under 50 chars)
+- CRITICAL: For props with object/interface types (like StoreInfo, BannerData, Product), return actual JSON objects with realistic fields — NEVER return a plain string
+- For array-typed props, return an array of objects with realistic sample data — NEVER return a string
 
 Example response format:
 {"Default":{"label":"Save changes","size":"md"},"Primary":{"label":"Submit form","size":"lg"}}`;
@@ -146,10 +148,23 @@ function parseAiResponse(
     const validPropNames = new Set(meta.props.map((p) => p.name));
     const functionProps = new Set(meta.props.filter((p) => isFunctionProp(p.typeName)).map((p) => p.name));
 
+    // Build a map of prop name → type for validation
+    const propTypeMap = new Map<string, string>();
+    for (const p of meta.props) {
+      propTypeMap.set(p.name, p.typeName);
+    }
+
     const sanitize = (args: Record<string, unknown>): Record<string, unknown> => {
       const clean: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(args)) {
         if (validPropNames.has(key) && !functionProps.has(key)) {
+          // Validate: don't accept a string for an object/array-typed prop
+          const propType = propTypeMap.get(key) ?? '';
+          const strippedType = propType.split('|').map(t => t.trim()).filter(t => t !== 'undefined' && t !== 'null').join(' | ');
+          if (typeof value === 'string' && isObjectOrArrayType(strippedType)) {
+            // Skip — the AI returned a string for a complex type, let fallback handle it
+            continue;
+          }
           clean[key] = value;
         }
       }
@@ -211,4 +226,26 @@ function buildFallbackArgs(
 
 function isFunctionProp(typeName: string): boolean {
   return /^\s*\(.*\)\s*=>\s*\S/.test(typeName) || /^Function$/.test(typeName);
+}
+
+/**
+ * Returns true if the type represents an object, array, or named interface type
+ * (i.e., something that should NOT be a plain string in args).
+ */
+function isObjectOrArrayType(typeName: string): boolean {
+  const clean = typeName.trim();
+  // Array types
+  if (/\[\]$/.test(clean) || /^Array</.test(clean)) return true;
+  // Record / inline object types
+  if (/^Record</.test(clean) || /^\{/.test(clean)) return true;
+  // Named types starting with capital (likely interfaces/type aliases)
+  // Exclude known primitives and React types that accept strings
+  if (/^[A-Z]/.test(clean) &&
+      !['Function', 'String', 'Number', 'Boolean'].includes(clean) &&
+      !/^React\./.test(clean) &&
+      !/\bReactNode\b|\bReactElement\b|\bJSX\.Element\b/.test(clean) &&
+      !/\b(LucideIcon|IconType|ComponentType|FC|FunctionComponent|ElementType|ForwardRefExoticComponent)\b/.test(clean)) {
+    return true;
+  }
+  return false;
 }

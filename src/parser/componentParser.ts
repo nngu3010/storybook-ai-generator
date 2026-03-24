@@ -54,6 +54,21 @@ export function parseComponent(project: Project, filePath: string): ComponentMet
     };
   }
 
+  // Detect async server components — cannot render in Storybook
+  const fileContent = sourceFile.getFullText();
+  if (/export\s+default\s+async\s+function\b/.test(fileContent) ||
+      /export\s+default\s+async\s*\(/.test(fileContent)) {
+    // Check for 'use client' — if present, it's a client component
+    if (!/^\s*['"]use client['"];?\s*$/m.test(fileContent)) {
+      return {
+        name: fileBaseName(filePath),
+        filePath,
+        props: [],
+        skipReason: 'Async server component — cannot render in Storybook browser',
+      };
+    }
+  }
+
   const componentName = resolveComponentName(defaultExport, filePath);
 
   // Detect HOC: if the function returns another function/component

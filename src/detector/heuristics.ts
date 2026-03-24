@@ -23,6 +23,9 @@ export function componentConfidence(filePath: string, fileContent: string): numb
   const isBarrel = isOnlyReExports(fileContent);
   if (isBarrel) return 0;
 
+  // Async server components cannot render in Storybook
+  if (isAsyncServerComponent(fileContent)) return 0;
+
   // Must be a .tsx or .jsx file to contain JSX
   if (!/\.(tsx|jsx)$/.test(filePath)) return 0;
 
@@ -94,4 +97,30 @@ function isOnlyReExports(content: string): boolean {
   );
 
   return allExports && nonExportLines.length === 0;
+}
+
+/**
+ * Detects async server components — these export an async function as default
+ * and do NOT have a 'use client' directive, meaning they're server-only.
+ */
+export function isAsyncServerComponent(content: string): boolean {
+  // If file has 'use client' directive, it's a client component (even if async)
+  if (/^\s*['"]use client['"];?\s*$/m.test(content)) return false;
+
+  // Check for async default export patterns:
+  // - export default async function Foo()
+  // - const Foo = async () => ... ; export default Foo
+  // - export default async () =>
+  if (/export\s+default\s+async\s+function\b/.test(content)) return true;
+  if (/export\s+default\s+async\s*\(/.test(content)) return true;
+
+  // Check for: const Foo = async (...) => ... with export default Foo
+  const asyncConstMatch = content.match(/(?:const|let|var)\s+([A-Z][A-Za-z0-9_]*)\s*=\s*async\s/);
+  if (asyncConstMatch) {
+    const name = asyncConstMatch[1];
+    const exportPattern = new RegExp(`export\\s+default\\s+${name}\\b`);
+    if (exportPattern.test(content)) return true;
+  }
+
+  return false;
 }
