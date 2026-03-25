@@ -51,7 +51,18 @@ export async function resolveTypeDefinition(
   // Also add any .ts files (not just components) to broaden type coverage
   addTypeFiles(project, resolvedDir);
 
-  // Find the type by name across all source files
+  return resolveTypeDefinitionFromProject(project, typeName, maxDepth);
+}
+
+/**
+ * Resolve a TypeScript type by name using an existing ts-morph Project.
+ * Synchronous — avoids rebuilding the project per call.
+ */
+export function resolveTypeDefinitionFromProject(
+  project: Project,
+  typeName: string,
+  maxDepth: number = MAX_DEPTH,
+): ResolvedTypeDefinition | null {
   for (const sf of project.getSourceFiles()) {
     // Check interfaces
     const iface = sf.getInterface(typeName);
@@ -270,7 +281,7 @@ function getTypeName(type: Type, sourceFile: SourceFile): string {
  * Add common type definition files (.ts, not .tsx) to broaden type coverage
  * beyond just component files.
  */
-function addTypeFiles(project: Project, dir: string): void {
+export function addTypeFiles(project: Project, dir: string): void {
   try {
     const { glob } = require('glob');
     // Synchronous glob for simplicity

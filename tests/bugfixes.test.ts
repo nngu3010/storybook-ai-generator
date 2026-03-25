@@ -145,6 +145,5 @@ describe('MCP generate_stories ai parameter', () => {
     const toolSection = serverSource.slice(startIdx, endIdx + 30);
     expect(toolSection).toContain('ai:');
     expect(toolSection).toContain("type: 'boolean'");
-    expect(toolSection).toContain('ANTHROPIC_API_KEY');
   });
 });

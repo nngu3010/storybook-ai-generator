@@ -8,6 +8,8 @@ export interface WriteOptions {
   overwrite?: boolean;
   /** Explicit output path — overrides the default co-located story path. */
   outputPath?: string;
+  /** Use .stories.tsx extension instead of .stories.ts */
+  tsx?: boolean;
 }
 
 /**
@@ -19,9 +21,11 @@ export function computeStoryPath(
   componentPath: string,
   scanDir: string,
   outputDir?: string,
+  tsx?: boolean,
 ): string {
   const baseName = path.basename(componentPath).replace(/\.(tsx?|jsx?)$/, '');
-  const storyFileName = `${baseName}.stories.ts`;
+  const ext = tsx ? '.stories.tsx' : '.stories.ts';
+  const storyFileName = `${baseName}${ext}`;
 
   if (!outputDir) {
     return path.join(path.dirname(componentPath), storyFileName);
@@ -60,7 +64,8 @@ export function writeStory(
   opts: WriteOptions = {}
 ): WriteResult {
   const baseName = path.basename(componentPath).replace(/\.(tsx?|jsx?)$/, '');
-  const storyPath = opts.outputPath ?? path.join(path.dirname(componentPath), `${baseName}.stories.ts`);
+  const ext = opts.tsx ? '.stories.tsx' : '.stories.ts';
+  const storyPath = opts.outputPath ?? path.join(path.dirname(componentPath), `${baseName}${ext}`);
   const dir = path.dirname(storyPath);
 
   if (!fs.existsSync(storyPath)) {
@@ -83,8 +88,9 @@ export function writeStory(
     return 'written';
   }
 
-  // Write to a .generated.ts file to avoid clobbering manual edits
-  const conflictPath = path.join(path.dirname(storyPath), `${baseName}.stories.generated.ts`);
+  // Write to a .generated file to avoid clobbering manual edits
+  const genExt = opts.tsx ? '.stories.generated.tsx' : '.stories.generated.ts';
+  const conflictPath = path.join(path.dirname(storyPath), `${baseName}${genExt}`);
   fs.writeFileSync(conflictPath, content, 'utf-8');
   return 'conflict';
 }

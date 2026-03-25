@@ -506,3 +506,70 @@ describe('context-enriched heuristic generation', () => {
     expect(typeof result.Default.title).toBe('string');
   });
 });
+
+// ---------------------------------------------------------------------------
+// AI prompt includes resolved type definitions
+// ---------------------------------------------------------------------------
+
+describe('AI prompt includes type definitions', () => {
+  it('sends full type schemas to the LLM when resolvedTypes are provided', async () => {
+    const { generateAiArgs } = await import('../src/ai/argGenerator.js');
+    const { ResolvedTypeDefinition } = await import('../src/parser/typeResolver.js');
+
+    let capturedPrompt = '';
+    const mockClient = {
+      messages: {
+        create: vi.fn().mockImplementation(async (req: any) => {
+          capturedPrompt = req.messages[0].content;
+          return {
+            content: [{ type: 'text', text: '{"Default":{"data":{}}}' }],
+          };
+        }),
+      },
+    } as any;
+
+    const meta: ComponentMeta = {
+      name: 'CartFooter',
+      filePath: '/src/CartFooter.tsx',
+      props: [
+        { name: 'data', typeName: 'Cart', required: true },
+        { name: 'label', typeName: 'string', required: false },
+      ],
+    };
+
+    const resolvedTypes = new Map<string, import('../src/parser/typeResolver.js').ResolvedTypeDefinition>();
+    resolvedTypes.set('Cart', {
+      name: 'Cart',
+      kind: 'interface',
+      properties: {
+        id: { type: 'string', required: true },
+        items: {
+          type: 'CartItem[]',
+          required: true,
+          resolved: {
+            name: 'items',
+            kind: 'array',
+            elementType: {
+              name: 'CartItem',
+              kind: 'interface',
+              properties: {
+                product: { type: 'string', required: true },
+                quantity: { type: 'number', required: true },
+              },
+            },
+          },
+        },
+        total: { type: 'number', required: true },
+      },
+    });
+
+    await generateAiArgs(meta, mockClient, undefined, resolvedTypes);
+
+    // Prompt should contain the type definition
+    expect(capturedPrompt).toContain('interface Cart');
+    expect(capturedPrompt).toContain('id');
+    expect(capturedPrompt).toContain('items');
+    expect(capturedPrompt).toContain('total');
+    expect(capturedPrompt).toContain('Type Definitions');
+  });
+});

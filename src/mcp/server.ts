@@ -23,7 +23,10 @@ import { resolveTypeDefinition } from '../parser/typeResolver.js';
 const TOOLS = [
   {
     name: 'list_components',
-    description: 'Discover all React/TypeScript components in a directory. Returns component names, file paths, and a summary of their props.',
+    description:
+      'Discover all React/TypeScript components in a directory. Returns component names, file paths, ' +
+      'and a summary of their props. START HERE — call this first to find components, then use ' +
+      'get_component for detailed metadata on specific ones.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -34,7 +37,12 @@ const TOOLS = [
   },
   {
     name: 'get_component',
-    description: 'Get full metadata for a specific component: all props with types, required/optional status, default values, JSDoc descriptions, and available variant values.',
+    description:
+      'Get full metadata for a specific component: all props with types, required/optional status, ' +
+      'default values, JSDoc descriptions, variant detection, and Storybook argTypes mapping. ' +
+      'For any prop with a complex type (interface, object, array of objects), follow up with ' +
+      'get_type_definition to see the full type structure — this is essential for generating ' +
+      'correctly-shaped mock data.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -46,7 +54,9 @@ const TOOLS = [
   },
   {
     name: 'get_story',
-    description: 'Get the generated CSF3 Storybook story content for a component. Returns the story file as a string — useful for understanding how a component should be used.',
+    description:
+      'Get the generated CSF3 Storybook story content for a component. Returns the story file as ' +
+      'a string. Useful for reviewing what was generated or understanding the expected story format.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -58,7 +68,10 @@ const TOOLS = [
   },
   {
     name: 'check_stories',
-    description: 'Verify that generated story files are in sync with their components. Reports which stories are valid, outdated, or missing.',
+    description:
+      'Verify that generated story files are in sync with their components. Reports which stories ' +
+      'are valid, outdated (props changed), or missing. Use this to identify which components need ' +
+      'story generation or regeneration.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -70,9 +83,11 @@ const TOOLS = [
   {
     name: 'suggest_args',
     description:
-      'Get smart heuristic-generated arg values for a component. Returns realistic args based on ' +
-      'prop names, types, and component context — no API key needed. Review and tweak the result, ' +
-      'then pass to generate_stories.',
+      'Get quick heuristic-generated arg values for a component based on prop names, types, and ' +
+      'component context. No API key needed. Good as a starting point for simple components with ' +
+      'primitive props. For components with complex/nested types, you will get better results by ' +
+      'calling get_component + get_type_definition + find_usage_examples, reasoning about the full ' +
+      'context yourself, and passing custom args to generate_stories.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -85,9 +100,10 @@ const TOOLS = [
   {
     name: 'scan_project_context',
     description:
-      'Scan a project for contextual information that helps craft better story args. ' +
-      'Finds component usages (how the component is rendered elsewhere), mock/fixture data files, ' +
-      'design tokens (theme/colors), and Storybook config. Output is capped at ~4000 chars.',
+      'Scan a project for contextual information: how a component is used in the codebase (JSX ' +
+      'snippets with real prop values), mock/fixture data files, design tokens, and Storybook config. ' +
+      'Use the output to craft args that are consistent with how the project already uses the component. ' +
+      'Output is capped at ~4000 chars.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -100,10 +116,17 @@ const TOOLS = [
   {
     name: 'generate_stories',
     description:
-      'Generate Storybook story files for components. You can provide custom args for each story ' +
-      'to create realistic, meaningful examples — use get_component first to understand the props, ' +
-      'then craft args that demonstrate the component well. Stories are written to disk next to ' +
-      'each component. Existing hand-edited stories are never overwritten unless overwrite is true.',
+      'Generate and write Storybook story files for components. Pass custom args to create realistic, ' +
+      'type-correct stories. Existing hand-edited stories are never overwritten unless overwrite is true.\n\n' +
+      'RECOMMENDED WORKFLOW for best results:\n' +
+      '1. get_component — understand props, variants, and argTypes\n' +
+      '2. get_type_definition — for each complex prop type, resolve the full interface tree\n' +
+      '3. find_usage_examples — see how the component is actually used with real prop values\n' +
+      '4. get_mock_fixtures — find existing test data to reuse\n' +
+      '5. Craft complete, type-correct args using all the context above\n' +
+      '6. Call generate_stories with your custom args\n' +
+      '7. validate_story — check the generated story compiles correctly\n' +
+      '8. If errors: read the error, fix the args, call generate_stories again (max 3 retries)',
     inputSchema: {
       type: 'object',
       properties: {
@@ -131,7 +154,7 @@ const TOOLS = [
             },
           },
         },
-        ai: { type: 'boolean', description: 'Use Claude AI to generate realistic arg values (requires ANTHROPIC_API_KEY env var). Falls back to heuristics if unavailable.' },
+        ai: { type: 'boolean', description: 'Use heuristic AI to generate arg values automatically. For best results, craft your own args using get_component + get_type_definition instead.' },
         overwrite: { type: 'boolean', description: 'Overwrite existing hand-edited stories (default: false)' },
         dryRun: { type: 'boolean', description: 'Preview what would be generated without writing files (default: false)' },
       },
@@ -141,10 +164,12 @@ const TOOLS = [
   {
     name: 'get_type_definition',
     description:
-      'Resolve a TypeScript type/interface by name and return its full structure as JSON, ' +
-      'recursively resolving nested types up to 6 levels deep. Use this to understand complex ' +
-      'prop types (e.g. Cart → items: Item[] → product: Product) so you can generate correct ' +
-      'deeply-nested mock data for story args. Works with interfaces, type aliases, and enums.',
+      'Resolve a TypeScript type/interface by name and return its full structure as JSON, recursively ' +
+      'resolving nested types up to 6 levels deep. ESSENTIAL for complex props — when get_component ' +
+      'shows a prop like "cartData: Cart", call this with type="Cart" to see the full interface tree ' +
+      '(Cart → items: CartItem[] → product: Product → metadata: ProductMetadata). Use the resolved ' +
+      'structure to generate correctly-shaped nested mock data for story args. Works with interfaces, ' +
+      'type aliases, and enums.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -158,9 +183,10 @@ const TOOLS = [
   {
     name: 'find_usage_examples',
     description:
-      'Find real usage examples of a component in the codebase. Returns JSX snippets showing ' +
-      'how the component is actually rendered with real prop values. Use this to understand what ' +
-      'prop combinations work well together and to generate realistic story args.',
+      'Find real usage examples of a component in the codebase. Returns JSX snippets showing how ' +
+      'the component is actually rendered with real prop values. Use this to understand what prop ' +
+      'combinations and values the project actually uses — prefer these real values over invented ' +
+      'placeholders when crafting story args.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -173,10 +199,11 @@ const TOOLS = [
   {
     name: 'validate_story',
     description:
-      'Validate a generated story file by checking that it compiles correctly with TypeScript. ' +
-      'Returns success or failure with specific error messages. Use this after generate_stories ' +
-      'to verify stories are correct — if errors are found, read the error, call get_type_definition ' +
-      'to understand the expected shape, fix the args, and retry. Enables a self-healing agentic loop.',
+      'Validate a generated story file by checking it compiles correctly with TypeScript. Returns ' +
+      'success or a list of specific error messages with line numbers. ALWAYS call this after ' +
+      'generate_stories. If errors are found: read the error message, call get_type_definition for ' +
+      'the failing prop type to understand the expected shape, fix the args, and call generate_stories ' +
+      'again. This generate → validate → fix loop is the key to producing stories that work.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -190,9 +217,9 @@ const TOOLS = [
     name: 'get_mock_fixtures',
     description:
       'Find existing test mocks, fixture data, and seed files in the project that match a component\'s ' +
-      'prop types. Returns file paths and content previews of mock objects from __mocks__, __fixtures__, ' +
-      'test files, and data files. Use this to find realistic data you can reuse in story args instead ' +
-      'of inventing placeholder values.',
+      'prop types. Returns file paths, content previews, and relevance scores from __mocks__, ' +
+      '__fixtures__, test files, and data files. Check this BEFORE inventing data — if the project ' +
+      'already has mock objects for the types you need, reuse them for consistency with the test suite.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -5,7 +5,7 @@ import { execSync } from 'child_process';
 import { findComponents } from '../../detector/componentFinder.js';
 import { buildProgram } from '../../parser/programBuilder.js';
 import { parseComponent } from '../../parser/componentParser.js';
-import { buildStoryContent } from '../../generator/storyBuilder.js';
+import { buildStoryContent, needsTsxExtension } from '../../generator/storyBuilder.js';
 import { writeStory, computeStoryPath, computeImportPath } from '../../generator/storyWriter.js';
 import { logger } from '../../utils/logger.js';
 import { type TypeErrorInfo, findTsconfig, parseTscOutput } from '../../utils/typecheck.js';
@@ -16,6 +16,7 @@ import { scanRequiredDecorators, type RequiredDecorator } from '../../detector/p
 import { detectProviders, type DetectedProvider } from '../../decorators/providerDetector.js';
 import { scanLayoutProviders } from '../../decorators/layoutScanner.js';
 import type Anthropic from '@anthropic-ai/sdk';
+import { addTypeFiles, resolveTypeDefinitionFromProject, type ResolvedTypeDefinition } from '../../parser/typeResolver.js';
 
 export interface GenerateOptions {
   overwrite?: boolean;
@@ -42,6 +43,12 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
 
   // Step 2: Build ts-morph project with all discovered files
   const project = buildProgram(resolvedDir, componentFiles);
+
+  // Add type definition files for cross-file type resolution
+  addTypeFiles(project, resolvedDir);
+
+  // Cache for resolved type definitions across all components
+  const typeCache = new Map<string, ResolvedTypeDefinition | null>();
 
   // Step 2b: Detect global providers (package.json + layout files)
   const pkgProviders = detectProviders(resolvedDir);
@@ -104,17 +111,21 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
         continue;
       }
 
-      const storyOutputPath = computeStoryPath(filePath, resolvedDir, resolvedOutputDir);
-      const importRelPath = computeImportPath(storyOutputPath, filePath);
+      let useTsx = false;
+      let storyOutputPath = computeStoryPath(filePath, resolvedDir, resolvedOutputDir);
+      let importRelPath = computeImportPath(storyOutputPath, filePath);
+
+      // Resolve complex prop types for enriched arg generation
+      const resolvedTypes = resolvePropsTypes(meta.props, project, typeCache);
 
       // Generate AI args if enabled
       let aiArgs;
       if (meta.props.length > 0 && (aiClient || useHeuristic)) {
         const projectContext = await scanProjectContext(resolvedDir, meta.name);
         if (aiClient) {
-          aiArgs = await generateAiArgs(meta, aiClient, projectContext);
+          aiArgs = await generateAiArgs(meta, aiClient, projectContext, resolvedTypes, project);
         } else {
-          aiArgs = generateHeuristicArgs(meta, projectContext);
+          aiArgs = generateHeuristicArgs(meta, projectContext, resolvedTypes);
         }
       }
 
@@ -123,6 +134,13 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
       const decorators = mergeDecorators(globalDecorators, perComponentDecorators);
 
       const content = buildStoryContent(meta, importRelPath, { aiArgs, decorators });
+
+      // Detect if JSX content requires .tsx extension
+      useTsx = needsTsxExtension(content);
+      if (useTsx) {
+        storyOutputPath = computeStoryPath(filePath, resolvedDir, resolvedOutputDir, true);
+        importRelPath = computeImportPath(storyOutputPath, filePath);
+      }
 
       // Validate generated content before writing
       const validationErrors = validateStoryContent(content, meta.name);
@@ -136,7 +154,7 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
         continue;
       }
 
-      const result = writeStory(filePath, content, { overwrite: opts.overwrite, outputPath: resolvedOutputDir ? storyOutputPath : undefined });
+      const result = writeStory(filePath, content, { overwrite: opts.overwrite, outputPath: resolvedOutputDir ? storyOutputPath : undefined, tsx: useTsx });
 
       switch (result) {
         case 'written':
@@ -418,4 +436,61 @@ export function mergeDecorators(
   }
 
   return merged;
+}
+
+/**
+ * Resolve complex prop types using the shared ts-morph Project.
+ * Returns a Map from type name to its resolved definition.
+ * Uses a cache across the entire run to avoid redundant resolution.
+ */
+function resolvePropsTypes(
+  props: import('../../parser/componentParser.js').PropMeta[],
+  project: import('ts-morph').Project,
+  cache: Map<string, ResolvedTypeDefinition | null>,
+): Map<string, ResolvedTypeDefinition> {
+  const result = new Map<string, ResolvedTypeDefinition>();
+
+  for (const prop of props) {
+    const typeName = extractTypeName(prop.typeName);
+    if (!typeName || result.has(typeName)) continue;
+
+    if (cache.has(typeName)) {
+      const cached = cache.get(typeName);
+      if (cached) result.set(typeName, cached);
+      continue;
+    }
+
+    const resolved = resolveTypeDefinitionFromProject(project, typeName);
+    cache.set(typeName, resolved);
+    if (resolved) result.set(typeName, resolved);
+  }
+
+  return result;
+}
+
+/**
+ * Extract the base named type from a type string.
+ * Returns null for primitives, functions, React types, etc.
+ */
+function extractTypeName(typeName: string): string | null {
+  let clean = typeName.trim();
+  // Strip nullable
+  clean = clean.split('|').map(t => t.trim()).filter(t => t !== 'undefined' && t !== 'null').join(' | ');
+  // Strip array suffix
+  if (clean.endsWith('[]')) clean = clean.slice(0, -2);
+  const arrayMatch = clean.match(/^Array<(.+)>$/);
+  if (arrayMatch) clean = arrayMatch[1];
+  clean = clean.trim();
+
+  // Skip primitives, functions, React types, unions, intersections
+  const skip = ['string', 'number', 'boolean', 'any', 'unknown', 'never', 'void', 'null', 'undefined'];
+  if (skip.includes(clean)) return null;
+  if (/^['"]/.test(clean) || /^\(/.test(clean)) return null;
+  if (clean.includes(' | ') || clean.includes(' & ')) return null;
+  if (/^(React\.|JSX\.)/.test(clean)) return null;
+  if (/^Record</.test(clean) || /^\{/.test(clean)) return null;
+  if (/\b(ReactNode|ReactElement|LucideIcon|IconType|ComponentType|FC|FunctionComponent|ElementType|ForwardRefExoticComponent)\b/.test(clean)) return null;
+  if (!/^[A-Z]/.test(clean)) return null;
+
+  return clean;
 }

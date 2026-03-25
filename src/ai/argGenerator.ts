@@ -4,6 +4,11 @@ import { getDefaultArg } from '../mapper/typeMapper.js';
 import { detectVariantProp, generateVariantStories } from '../mapper/variantDetector.js';
 import { logger } from '../utils/logger.js';
 import type { ProjectContext } from '../mcp/contextScanner.js';
+import type { ResolvedTypeDefinition } from '../parser/typeResolver.js';
+import type { Project } from 'ts-morph';
+import { classifyComplexity } from './typeComplexity.js';
+import { generateHeuristicArgs } from './heuristicGenerator.js';
+import { applyPropRelationships } from './propRelationships.js';
 
 export interface AiStoryArgs {
   /** Args for the Default story */
@@ -20,7 +25,18 @@ export async function generateAiArgs(
   meta: ComponentMeta,
   client: Anthropic,
   projectContext?: ProjectContext,
+  resolvedTypes?: Map<string, ResolvedTypeDefinition>,
+  project?: Project,
 ): Promise<AiStoryArgs> {
+  // Tiered model strategy: skip LLM for simple components
+  if (project) {
+    const { tier } = classifyComplexity(meta.props, project);
+    if (tier === 'simple') {
+      logger.info(`${meta.name}: simple props — using heuristics (no API call)`);
+      return generateHeuristicArgs(meta, projectContext, resolvedTypes);
+    }
+  }
+
   const variantProp = detectVariantProp(meta.props);
   const variantStories = variantProp ? generateVariantStories(variantProp) : [];
 
@@ -34,12 +50,26 @@ export async function generateAiArgs(
 
   const storyNames = ['Default', ...variantStories.map((v) => v.name)];
 
-  const prompt = buildPrompt(meta.name, propDescriptions, storyNames, variantProp ?? null, projectContext);
+  const prompt = buildPrompt(meta.name, propDescriptions, storyNames, variantProp ?? null, projectContext, resolvedTypes);
+
+  // Select model based on complexity tier
+  let model = 'claude-haiku-4-5-20251001';
+  let maxTokens = 1024;
+  if (project) {
+    const { tier } = classifyComplexity(meta.props, project);
+    if (tier === 'complex') {
+      model = 'claude-sonnet-4-20250514';
+      maxTokens = 2048;
+      logger.info(`${meta.name}: complex props — using Sonnet for deeper inference`);
+    } else {
+      logger.info(`${meta.name}: medium complexity — using Haiku`);
+    }
+  }
 
   try {
     const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
+      model,
+      max_tokens: maxTokens,
       messages: [{ role: 'user', content: prompt }],
     });
 
@@ -68,6 +98,7 @@ function buildPrompt(
   storyNames: string[],
   variantProp: PropMeta | null,
   projectContext?: ProjectContext,
+  resolvedTypes?: Map<string, ResolvedTypeDefinition>,
 ): string {
   const propsTable = props
     .filter((p) => !isFunctionProp(p.type))
@@ -79,6 +110,29 @@ function buildPrompt(
       return parts.join(' ');
     })
     .join('\n');
+
+  // Build type definitions section from resolved types
+  let typeDefsSection = '';
+  if (resolvedTypes && resolvedTypes.size > 0) {
+    const typeLines: string[] = [];
+    let totalChars = 0;
+    const MAX_TYPE_CHARS = 2000;
+
+    for (const [, resolved] of resolvedTypes) {
+      if (totalChars >= MAX_TYPE_CHARS) break;
+      const serialized = serializeTypeForPrompt(resolved, 0);
+      if (totalChars + serialized.length > MAX_TYPE_CHARS) break;
+      typeLines.push(serialized);
+      totalChars += serialized.length;
+    }
+
+    if (typeLines.length > 0) {
+      typeDefsSection = `
+Type Definitions (use these to generate correctly shaped objects with all required fields):
+${typeLines.join('\n\n')}
+`;
+    }
+  }
 
   let contextSection = '';
   if (projectContext?.componentUsages?.length) {
@@ -110,7 +164,7 @@ ${propsTable}
 
 Stories to generate args for: ${storyNames.join(', ')}
 ${variantProp ? `The variant prop is "${variantProp.name}" — each variant story should use a different value for this prop.` : ''}
-${contextSection}
+${typeDefsSection}${contextSection}
 Rules:
 - Return ONLY a JSON object, no markdown fences, no explanation
 - Keys are story names, values are objects with prop names as keys
@@ -127,6 +181,52 @@ Rules:
 
 Example response format:
 {"Default":{"label":"Save changes","size":"md"},"Primary":{"label":"Submit form","size":"lg"}}`;
+}
+
+/**
+ * Serialize a resolved type definition into a readable pseudo-TypeScript format for the LLM prompt.
+ */
+function serializeTypeForPrompt(resolved: ResolvedTypeDefinition, indent: number): string {
+  const pad = '  '.repeat(indent);
+
+  if (resolved.kind === 'enum' && resolved.enumMembers) {
+    const members = resolved.enumMembers.map(m => `${pad}  ${m.name} = ${JSON.stringify(m.value)}`).join('\n');
+    return `${pad}enum ${resolved.name} {\n${members}\n${pad}}`;
+  }
+
+  if (resolved.kind === 'union' && resolved.unionMembers) {
+    return `${pad}type ${resolved.name} = ${resolved.unionMembers.join(' | ')}`;
+  }
+
+  if (resolved.kind === 'array' && resolved.elementType) {
+    const elementStr = resolved.elementType.kind === 'interface' && resolved.elementType.properties
+      ? serializeTypeForPrompt(resolved.elementType, indent)
+      : resolved.elementType.text ?? resolved.elementType.name;
+    return `${pad}${resolved.name}: ${elementStr}[]`;
+  }
+
+  if (resolved.kind === 'interface' && resolved.properties) {
+    const props = Object.entries(resolved.properties).map(([name, prop]) => {
+      const opt = prop.required ? '' : '?';
+      const desc = prop.description ? ` // ${prop.description}` : '';
+      if (prop.resolved && prop.resolved.kind === 'interface' && prop.resolved.properties) {
+        const nested = serializeTypeForPrompt(prop.resolved, indent + 1);
+        return `${pad}  ${name}${opt}: ${nested}`;
+      }
+      if (prop.resolved && prop.resolved.kind === 'array' && prop.resolved.elementType) {
+        const el = prop.resolved.elementType;
+        if (el.kind === 'interface' && el.properties) {
+          const nested = serializeTypeForPrompt(el, indent + 1);
+          return `${pad}  ${name}${opt}: ${nested}[]`;
+        }
+        return `${pad}  ${name}${opt}: ${el.text ?? el.name}[]${desc}`;
+      }
+      return `${pad}  ${name}${opt}: ${prop.type}${desc}`;
+    });
+    return `${pad}interface ${resolved.name} {\n${props.join('\n')}\n${pad}}`;
+  }
+
+  return `${pad}type ${resolved.name} = ${resolved.text ?? 'unknown'}`;
 }
 
 function parseAiResponse(
@@ -192,7 +292,12 @@ function parseAiResponse(
       variants[vs.name] = aiArgs;
     }
 
-    return { Default: defaultArgs, variants };
+    return {
+      Default: applyPropRelationships(defaultArgs, meta.props),
+      variants: Object.fromEntries(
+        Object.entries(variants).map(([k, v]) => [k, applyPropRelationships(v, meta.props)])
+      ),
+    };
   } catch {
     logger.warn(`Failed to parse AI JSON for ${meta.name}, falling back to defaults`);
     return buildFallbackArgs(meta, variantStories);

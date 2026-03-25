@@ -1,14 +1,15 @@
 # sbook-ai
 
-**The fastest way to generate Storybook stories for React/TypeScript components.**
+**AI-native Storybook story generation for React/TypeScript components.**
 
-One command. Zero config. AI-powered args. Works with every AI editor.
+No API key needed. Your editor's AI does the thinking. The tool does the work.
 
 ```bash
-npx sbook-ai generate ./src/components --ai
+npx sbook-ai setup --mcp    # connect to your AI editor
+# Then in Cursor/Claude Code/Windsurf: "Generate stories for my components"
 ```
 
-> 13 components scanned. 13 stories generated. 0.8s.
+> Works with Cursor, Claude Code, Windsurf, VS Code Copilot — any editor with MCP support.
 
 ---
 
@@ -16,36 +17,45 @@ npx sbook-ai generate ./src/components --ai
 
 Writing Storybook stories by hand is tedious. Keeping them in sync with component changes is worse. `sbook-ai` reads your TypeScript types, understands your props, and generates production-ready CSF3 stories automatically.
 
-- **Instant setup** — No config files. Point it at a directory and go.
-- **AI-powered args** — Smart heuristics generate realistic values (`"sarah@example.com"` not `""`, `9.99` not `0`). Add an API key for Claude-powered args.
+- **No API key needed** — Your editor's AI (Cursor, Claude Code, Windsurf, Copilot) does the reasoning via MCP. Zero extra cost.
+- **Type-aware** — Resolves full TypeScript interfaces so complex props get correctly-shaped nested data, not `{}`.
+- **Self-healing** — Editor generates stories, validates them, and auto-fixes errors in a loop.
 - **Always in sync** — Checksum-based verification catches prop drift. Watch mode regenerates on save.
 - **Safe by default** — Never overwrites hand-edited stories. CI-friendly `--check` mode writes nothing.
-- **Works with your AI editor** — MCP server integrates with Claude Code, Cursor, VS Code Copilot, and Windsurf. One command: `sbook-ai setup`.
+- **Works everywhere** — MCP server for AI editors + CLI for CI/CD. One command: `sbook-ai setup`.
 
 ---
 
 ## Quick Start
 
-### 1. Install
+### With any AI editor (recommended — no API key needed)
+
+Your editor's built-in AI does the reasoning. The tool provides the data and writes the files.
 
 ```bash
 npm install --save-dev storybook-ai-generator
+npx sbook-ai setup --mcp
 ```
 
-### 2. Generate stories
+Then in your editor (Cursor, Claude Code, Windsurf, VS Code Copilot):
+
+> "Generate Storybook stories for my components"
+
+The editor's AI calls MCP tools to analyze your TypeScript types, understand how components are used, craft realistic args, generate stories, and validate they compile — all automatically.
+
+### CLI mode (for CI/CD or batch generation)
 
 ```bash
-npx sbook-ai generate ./src/components --ai
+npm install --save-dev storybook-ai-generator
+npx sbook-ai generate ./src/components
 ```
 
-### 3. Launch Storybook
+### Launch Storybook
 
 ```bash
 npx storybook@latest init   # if not already installed
 npm run storybook
 ```
-
-That's it. Your stories are ready.
 
 ---
 
@@ -60,7 +70,7 @@ No other tool combines TypeScript-aware prop detection, automatic variant storie
 | Automatic variant stories | **Yes** | No | No | Non-deterministic | No |
 | Smart arg values (no API key) | **Yes** (40+ patterns) | No | No | No | No |
 | AI-powered args (Claude) | **Yes** | No | No | Yes (OpenAI/Ollama) | No |
-| MCP server for AI agents | **7 tools** | Separate addon | No | No | No |
+| MCP server for AI editors | **10 tools** | Separate addon | No | No | No |
 | Watch mode | **Yes** | No | No | No | Yes (Vite plugin) |
 | CI verification (`--check`) | **Yes** | No | No | No | No |
 | Hand-edit protection | **Yes** (checksums) | N/A | N/A | No | No |
@@ -94,11 +104,7 @@ npx sbook-ai generate ./src --ai
 | `icon` | StatsCard | `Circle` (from lucide-react) |
 | `disabled` | any | `false` (true in variant) |
 
-**Want even smarter args?** Add an Anthropic API key for Claude-powered generation:
-
-```bash
-npx sbook-ai setup --api-key
-```
+**Want even smarter args?** Use MCP mode — your editor's AI generates args using full type definitions, real usage patterns, and existing mock data. No API key needed.
 
 ### Automatic Variant Stories
 
@@ -140,9 +146,9 @@ npx sbook-ai decorators ./src
 
 Detects: Redux, Zustand, React Query, React Router, and more.
 
-### MCP Server for AI Agents
+### MCP Server for AI Editors
 
-Expose your component library to any AI assistant via [Model Context Protocol](https://modelcontextprotocol.io):
+The primary way to use sbook-ai. Your editor's AI orchestrates the tools — no API key needed.
 
 ```bash
 npx sbook-ai setup --mcp
@@ -157,17 +163,28 @@ Auto-detects your editor and writes the config:
 | VS Code (Copilot) | `.vscode/mcp.json` |
 | Windsurf | `.windsurf/mcp.json` |
 
-**7 MCP tools available:**
+**10 MCP tools available:**
 
 | Tool | What it does |
 |---|---|
 | `list_components` | Discover all components with prop summaries |
-| `get_component` | Full metadata: props, argTypes, variant detection, semantic hints |
-| `suggest_args` | Get heuristic-generated arg values to review and refine |
-| `scan_project_context` | Find component usages, mock data, design tokens in the project |
+| `get_component` | Full metadata: props, argTypes, variant detection |
+| `get_type_definition` | Resolve full TypeScript interface trees for complex props |
+| `find_usage_examples` | Find real JSX usage with actual prop values |
+| `get_mock_fixtures` | Find existing test mocks and fixture data to reuse |
+| `suggest_args` | Get heuristic-generated arg values (quick fallback) |
+| `scan_project_context` | Find component usages, mock data, design tokens |
 | `generate_stories` | Generate stories with custom args |
-| `check_stories` | Verify stories are in sync |
-| `get_story` | Get generated story content for any component |
+| `validate_story` | Check generated stories compile correctly |
+| `check_stories` | Verify stories are in sync with components |
+
+**How the editor uses them:**
+1. `get_component` → understand the props
+2. `get_type_definition` → resolve complex types like `Cart` into full interface trees
+3. `find_usage_examples` + `get_mock_fixtures` → gather real project data
+4. Editor's AI crafts type-correct args using all the context
+5. `generate_stories` → write stories with the crafted args
+6. `validate_story` → check they compile; fix and retry if not
 
 ### CI Verification
 

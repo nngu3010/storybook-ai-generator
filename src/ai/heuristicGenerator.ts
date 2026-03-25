@@ -6,13 +6,19 @@ import type { AiStoryArgs } from './argGenerator.js';
 import type { ProjectContext } from '../mcp/contextScanner.js';
 import { extractArgsFromUsages, type ExtractedUsageArgs } from './usageExtractor.js';
 import { extractValuesFromDataFiles, mergeExtracted } from './dataExtractor.js';
+import type { ResolvedTypeDefinition } from '../parser/typeResolver.js';
+import { applyPropRelationships } from './propRelationships.js';
 
 /**
  * Generates realistic arg values using keyword heuristics — no API key needed.
  * Analyses component name, prop names, JSDoc descriptions, and types to pick
  * semantically appropriate values.
  */
-export function generateHeuristicArgs(meta: ComponentMeta, projectContext?: ProjectContext): AiStoryArgs {
+export function generateHeuristicArgs(
+  meta: ComponentMeta,
+  projectContext?: ProjectContext,
+  resolvedTypes?: Map<string, ResolvedTypeDefinition>,
+): AiStoryArgs {
   const variantProp = detectVariantProp(meta.props);
   const variantStories = variantProp ? generateVariantStories(variantProp) : [];
 
@@ -28,7 +34,7 @@ export function generateHeuristicArgs(meta: ComponentMeta, projectContext?: Proj
 
   for (const prop of meta.props) {
     if (isFunctionProp(prop.typeName)) continue;
-    defaultArgs[prop.name] = inferValue(prop, context, 0, extracted);
+    defaultArgs[prop.name] = inferValue(prop, context, 0, extracted, resolvedTypes);
   }
 
   const variants: Record<string, Record<string, unknown>> = {};
@@ -40,13 +46,18 @@ export function generateHeuristicArgs(meta: ComponentMeta, projectContext?: Proj
       if (prop.name === variantProp!.name) {
         variantArgs[prop.name] = vs.value;
       } else {
-        variantArgs[prop.name] = inferValue(prop, context, i + 1, extracted);
+        variantArgs[prop.name] = inferValue(prop, context, i + 1, extracted, resolvedTypes);
       }
     }
     variants[vs.name] = variantArgs;
   }
 
-  return { Default: defaultArgs, variants };
+  return {
+    Default: applyPropRelationships(defaultArgs, meta.props),
+    variants: Object.fromEntries(
+      Object.entries(variants).map(([k, v]) => [k, applyPropRelationships(v, meta.props)])
+    ),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -84,7 +95,13 @@ function inferContext(componentName: string): ComponentContext {
 // Value inference from prop name + type + context
 // ---------------------------------------------------------------------------
 
-function inferValue(prop: PropMeta, context: ComponentContext, variantIndex: number, extracted: ExtractedUsageArgs = {}): unknown {
+function inferValue(
+  prop: PropMeta,
+  context: ComponentContext,
+  variantIndex: number,
+  extracted: ExtractedUsageArgs = {},
+  resolvedTypes?: Map<string, ResolvedTypeDefinition>,
+): unknown {
   // Priority: real values extracted from codebase usage
   const usageValues = extracted[prop.name];
   if (usageValues && usageValues.length > 0) {
@@ -120,7 +137,9 @@ function inferValue(prop: PropMeta, context: ComponentContext, variantIndex: num
 
   // Array types
   if (/\[\]$/.test(clean) || /^Array</.test(clean)) {
-    return inferArrayValue(prop, context);
+    const elementTypeName = extractArrayElementTypeName(clean);
+    const resolvedElement = elementTypeName && resolvedTypes?.get(elementTypeName);
+    return inferArrayValue(prop, context, resolvedElement || undefined);
   }
 
   // Record / object types — generate meaningful sample data based on prop name
@@ -131,7 +150,8 @@ function inferValue(prop: PropMeta, context: ComponentContext, variantIndex: num
   // Named interface/type references (not primitive, not union, not array)
   // These are complex object types like StoreInfo, BannerData, etc.
   if (isNamedObjectType(clean)) {
-    return inferObjectValue(prop, context);
+    const resolvedType = resolvedTypes?.get(clean);
+    return inferObjectValue(prop, context, resolvedType || undefined);
   }
 
   // Boolean
@@ -310,7 +330,15 @@ function inferBooleanValue(name: string, desc: string, variantIndex: number): bo
 // Array inference
 // ---------------------------------------------------------------------------
 
-function inferArrayValue(prop: PropMeta, context: ComponentContext): unknown[] {
+function inferArrayValue(prop: PropMeta, context: ComponentContext, resolvedElementType?: ResolvedTypeDefinition): unknown[] {
+  // If we have a resolved element type with properties, generate typed items
+  if (resolvedElementType && resolvedElementType.kind === 'interface' && resolvedElementType.properties) {
+    return [
+      generateObjectFromResolvedType(resolvedElementType, 0),
+      generateObjectFromResolvedType(resolvedElementType, 1),
+    ];
+  }
+
   const name = prop.name.toLowerCase();
   const type = prop.typeName;
 
@@ -629,9 +657,15 @@ function isNamedObjectType(clean: string): boolean {
 
 /**
  * Generates a meaningful object value for named types and Record/object types.
- * Uses the prop name and component context to create realistic placeholder data.
+ * When a resolved type definition is available, generates values matching the actual interface.
+ * Falls back to prop name and component context for realistic placeholder data.
  */
-function inferObjectValue(prop: PropMeta, context: ComponentContext): Record<string, unknown> {
+function inferObjectValue(prop: PropMeta, context: ComponentContext, resolvedType?: ResolvedTypeDefinition): Record<string, unknown> {
+  // If we have a resolved type with properties, generate from the actual type definition
+  if (resolvedType && resolvedType.kind === 'interface' && resolvedType.properties) {
+    return generateObjectFromResolvedType(resolvedType, 0);
+  }
+
   const name = prop.name.toLowerCase();
   const typeName = prop.typeName.toLowerCase();
 
@@ -725,4 +759,139 @@ function inferObjectValue(prop: PropMeta, context: ComponentContext): Record<str
     default:
       return { id: 1, label: 'Example', value: 'sample' };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Type-aware object generation from resolved type definitions
+// ---------------------------------------------------------------------------
+
+/** Sample values for generating realistic data, indexed by variant */
+const SAMPLE_STRINGS: Record<string, string[]> = {
+  id: ['id-001', 'id-002', 'id-003'],
+  name: ['Example Item', 'Sample Product', 'Test Entry'],
+  title: ['Getting Started', 'Featured', 'New Arrival'],
+  label: ['Primary', 'Secondary', 'Default'],
+  description: ['A brief description of this item.', 'More details here.', 'Summary text.'],
+  email: ['sarah@example.com', 'james@example.com', 'hello@company.com'],
+  address: ['123 Main St', '456 Oak Ave', '789 Pine Rd'],
+  street: ['123 Main St', '456 Oak Ave', '789 Pine Rd'],
+  city: ['San Francisco', 'New York', 'Chicago'],
+  state: ['CA', 'NY', 'IL'],
+  zip: ['94102', '10001', '60601'],
+  code: ['SAVE10', 'WELCOME', 'DEAL20'],
+  url: ['https://example.com', 'https://example.com/about', 'https://example.com/products'],
+  image: ['https://picsum.photos/200/300', 'https://picsum.photos/400/300', 'https://picsum.photos/300/300'],
+  sku: ['SKU-001', 'SKU-002', 'SKU-003'],
+  method: ['standard', 'express', 'overnight'],
+  status: ['active', 'pending', 'completed'],
+};
+
+const SAMPLE_NUMBERS: Record<string, number[]> = {
+  id: [1, 2, 3],
+  price: [9.99, 14.99, 24.99],
+  cost: [5.99, 8.99, 12.99],
+  total: [29.97, 49.95, 99.99],
+  subtotal: [24.97, 39.95, 84.99],
+  tax: [2.50, 4.00, 7.50],
+  discount: [5.00, 10.00, 15.00],
+  quantity: [2, 5, 1],
+  count: [3, 7, 12],
+  weight: [0.5, 1.2, 2.0],
+  width: [10, 20, 30],
+  height: [15, 25, 35],
+  depth: [5, 8, 12],
+  rating: [4.5, 3.8, 5.0],
+};
+
+/**
+ * Generate an object value by walking the resolved type definition's properties.
+ * Uses property names to pick realistic sample values.
+ */
+function generateObjectFromResolvedType(resolved: ResolvedTypeDefinition, variantIndex: number): Record<string, unknown> {
+  if (!resolved.properties) return {};
+
+  const result: Record<string, unknown> = {};
+
+  for (const [propName, prop] of Object.entries(resolved.properties)) {
+    const typeText = prop.type.toLowerCase().trim();
+
+    // Nested object with resolved type
+    if (prop.resolved && prop.resolved.kind === 'interface' && prop.resolved.properties) {
+      result[propName] = generateObjectFromResolvedType(prop.resolved, variantIndex);
+      continue;
+    }
+
+    // Array with resolved element type
+    if (prop.resolved && prop.resolved.kind === 'array' && prop.resolved.elementType) {
+      const el = prop.resolved.elementType;
+      if (el.kind === 'interface' && el.properties) {
+        result[propName] = [
+          generateObjectFromResolvedType(el, 0),
+          generateObjectFromResolvedType(el, 1),
+        ];
+      } else {
+        result[propName] = [];
+      }
+      continue;
+    }
+
+    // String literal union or enum
+    if (prop.resolved && prop.resolved.kind === 'union' && prop.resolved.unionMembers) {
+      const members = prop.resolved.unionMembers;
+      const cleaned = members.map(m => m.replace(/^['"]|['"]$/g, ''));
+      result[propName] = cleaned[variantIndex % cleaned.length];
+      continue;
+    }
+    if (prop.resolved && prop.resolved.kind === 'enum' && prop.resolved.enumMembers) {
+      result[propName] = prop.resolved.enumMembers[variantIndex % prop.resolved.enumMembers.length].value;
+      continue;
+    }
+
+    // Primitives — use name-based sample values
+    if (typeText.includes('string')) {
+      const key = propName.toLowerCase();
+      const samples = SAMPLE_STRINGS[key];
+      result[propName] = samples ? samples[variantIndex % samples.length] : `Sample ${propName}`;
+      continue;
+    }
+    if (typeText.includes('number')) {
+      const key = propName.toLowerCase();
+      const samples = SAMPLE_NUMBERS[key]
+        ?? Object.entries(SAMPLE_NUMBERS).find(([k]) => key.endsWith(k))?.[1];
+      result[propName] = samples ? samples[variantIndex % samples.length] : variantIndex + 1;
+      continue;
+    }
+    if (typeText.includes('boolean')) {
+      result[propName] = variantIndex === 0;
+      continue;
+    }
+
+    // String array
+    if (typeText === 'string[]' || typeText === 'array<string>') {
+      result[propName] = ['item-1', 'item-2'];
+      continue;
+    }
+
+    // Fallback for unknown types
+    result[propName] = undefined;
+  }
+
+  return result;
+}
+
+/**
+ * Extract the element type name from an array type string.
+ * e.g., "CartItem[]" → "CartItem", "Array<Product>" → "Product"
+ */
+function extractArrayElementTypeName(typeStr: string): string | null {
+  if (typeStr.endsWith('[]')) {
+    const name = typeStr.slice(0, -2).trim();
+    return /^[A-Z]/.test(name) ? name : null;
+  }
+  const match = typeStr.match(/^Array<(.+)>$/);
+  if (match) {
+    const name = match[1].trim();
+    return /^[A-Z]/.test(name) ? name : null;
+  }
+  return null;
 }

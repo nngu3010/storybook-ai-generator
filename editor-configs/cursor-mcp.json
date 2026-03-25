@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sbook-ai": {
+      "command": "npx",
+      "args": ["sbook-ai", "serve"]
+    }
+  }
+}

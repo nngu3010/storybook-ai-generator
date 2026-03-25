@@ -277,3 +277,13 @@ function collectComponentRefs(argSets: Record<string, unknown>[]): ComponentRef[
   }
   return refs;
 }
+
+/**
+ * Check if generated story content contains JSX syntax that requires .tsx extension.
+ * Looks for JSX-like tokens: self-closing tags, opening/closing elements.
+ */
+export function needsTsxExtension(content: string): boolean {
+  // Decorator wrappers produce JSX like (Story) => <Provider><Story /></Provider>
+  // Also check for any JSX element syntax
+  return /\/>|<[A-Z]\w*[\s>]|<\/[A-Z]/.test(content);
+}
