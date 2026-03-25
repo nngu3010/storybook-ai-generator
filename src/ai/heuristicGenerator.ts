@@ -605,8 +605,6 @@ function isStringLiteralUnion(clean: string): boolean {
   return extractStringLiterals(clean).length > 0;
 }
 
-// extractStringLiterals imported from ../utils/stringLiterals.js
-
 // ---------------------------------------------------------------------------
 // Object/interface inference
 // ---------------------------------------------------------------------------

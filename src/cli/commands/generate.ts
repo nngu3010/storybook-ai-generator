@@ -12,7 +12,9 @@ import { type TypeErrorInfo, findTsconfig, parseTscOutput } from '../../utils/ty
 import { generateAiArgs, createAiClient } from '../../ai/argGenerator.js';
 import { generateHeuristicArgs } from '../../ai/heuristicGenerator.js';
 import { scanProjectContext } from '../../mcp/contextScanner.js';
-import { scanRequiredDecorators } from '../../detector/providerScanner.js';
+import { scanRequiredDecorators, type RequiredDecorator } from '../../detector/providerScanner.js';
+import { detectProviders, type DetectedProvider } from '../../decorators/providerDetector.js';
+import { scanLayoutProviders } from '../../decorators/layoutScanner.js';
 import type Anthropic from '@anthropic-ai/sdk';
 
 export interface GenerateOptions {
@@ -40,6 +42,33 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
 
   // Step 2: Build ts-morph project with all discovered files
   const project = buildProgram(resolvedDir, componentFiles);
+
+  // Step 2b: Detect global providers (package.json + layout files)
+  const pkgProviders = detectProviders(resolvedDir);
+  const layoutProviders = scanLayoutProviders(resolvedDir);
+  const globalDecorators = [...pkgProviders, ...layoutProviders].map(providerToDecorator);
+  if (globalDecorators.length > 0) {
+    logger.info(`Detected providers: ${globalDecorators.map((d) => d.label).join(', ')}`);
+  }
+
+  // Write companion files (mockStore.ts, theme.ts) if needed
+  for (const provider of [...pkgProviders, ...layoutProviders]) {
+    if (provider.companionFile) {
+      const companionPath = path.join(
+        resolvedOutputDir ?? path.join(resolvedDir, '.storybook'),
+        provider.companionFile.filename,
+      );
+      if (!fs.existsSync(companionPath)) {
+        if (!opts.dryRun) {
+          fs.mkdirSync(path.dirname(companionPath), { recursive: true });
+          fs.writeFileSync(companionPath, provider.companionFile.content);
+          logger.success(`Created companion file: ${provider.companionFile.filename}`);
+        } else {
+          logger.info(`[dry-run] Would create companion file: ${provider.companionFile.filename}`);
+        }
+      }
+    }
+  }
 
   let generated = 0;
   let skipped = 0;
@@ -89,8 +118,9 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
         }
       }
 
-      // Detect provider dependencies for per-story decorators
-      const decorators = scanRequiredDecorators(filePath);
+      // Detect provider dependencies: merge global (package.json + layout) with per-component
+      const perComponentDecorators = scanRequiredDecorators(filePath);
+      const decorators = mergeDecorators(globalDecorators, perComponentDecorators);
 
       const content = buildStoryContent(meta, importRelPath, { aiArgs, decorators });
 
@@ -351,4 +381,41 @@ async function typecheckInTempDir(
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+}
+
+/** Convert a DetectedProvider (package.json / layout scanner) to a RequiredDecorator. */
+export function providerToDecorator(provider: DetectedProvider): RequiredDecorator {
+  return {
+    label: provider.label,
+    imports: provider.importStatement ? provider.importStatement.split('\n') : [],
+    decorator: provider.wrapper,
+  };
+}
+
+/**
+ * Merge global and per-component decorators, deduplicating by label.
+ * Per-component decorators take precedence (more specific).
+ */
+export function mergeDecorators(
+  global: RequiredDecorator[],
+  perComponent: RequiredDecorator[],
+): RequiredDecorator[] {
+  const seen = new Set<string>();
+  const merged: RequiredDecorator[] = [];
+
+  // Per-component first (higher specificity)
+  for (const dec of perComponent) {
+    if (seen.has(dec.label)) continue;
+    seen.add(dec.label);
+    merged.push(dec);
+  }
+
+  // Then global providers not already covered
+  for (const dec of global) {
+    if (seen.has(dec.label)) continue;
+    seen.add(dec.label);
+    merged.push(dec);
+  }
+
+  return merged;
 }

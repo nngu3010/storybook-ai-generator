@@ -189,8 +189,6 @@ function isComponentType(typeName: string): boolean {
   return /\b(LucideIcon|IconType|ComponentType|React\.ComponentType|FC|React\.FC|FunctionComponent|React\.FunctionComponent|ForwardRefExoticComponent|React\.ForwardRefExoticComponent|ElementType|React\.ElementType)\b/.test(typeName);
 }
 
-// extractStringLiterals imported from ../utils/stringLiterals.js
-
 function extractNumberLiterals(typeName: string): number[] {
   const parts = typeName.split('|').map((p) => p.trim());
   const literals: number[] = [];

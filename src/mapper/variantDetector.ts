@@ -63,8 +63,6 @@ function stripNullable(typeName: string): string {
     .trim();
 }
 
-// extractStringLiterals imported from ../utils/stringLiterals.js
-
 function capitalise(str: string): string {
   if (!str) return str;
   return str.charAt(0).toUpperCase() + str.slice(1);
