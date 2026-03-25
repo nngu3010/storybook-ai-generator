@@ -1,4 +1,5 @@
 import type { PropMeta } from '../parser/componentParser.js';
+import { extractStringLiterals } from '../utils/stringLiterals.js';
 
 const MAX_VARIANT_OPTIONS = 6;
 
@@ -62,15 +63,7 @@ function stripNullable(typeName: string): string {
     .trim();
 }
 
-function extractStringLiterals(typeName: string): string[] {
-  const parts = typeName.split('|').map((p) => p.trim());
-  const literals: string[] = [];
-  for (const part of parts) {
-    const match = part.match(/^['"](.+)['"]$/);
-    if (match) literals.push(match[1]);
-  }
-  return literals;
-}
+// extractStringLiterals imported from ../utils/stringLiterals.js
 
 function capitalise(str: string): string {
   if (!str) return str;

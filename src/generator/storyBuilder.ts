@@ -119,13 +119,15 @@ export function buildStoryContent(
   }
   lines.push(`};`);
 
+  // Track all emitted story identifiers (sanitised) to prevent collisions.
+  // "Default" is always emitted above, so seed the set with it.
+  const emittedNames = new Set<string>(['Default']);
+
   // Variant stories from detected variant prop
-  const emittedVariantNames = new Set<string>();
   for (const variant of variantStories) {
     const variantName = sanitiseIdentifier(variant.name);
-    // Skip variants that collide with the hardcoded Default story
-    if (variantName === 'Default') continue;
-    emittedVariantNames.add(variant.name);
+    if (emittedNames.has(variantName)) continue;
+    emittedNames.add(variantName);
     const aiVariantArgs = options.aiArgs?.variants?.[variant.name];
 
     lines.push(``);
@@ -153,8 +155,9 @@ export function buildStoryContent(
   // Emit custom variant args not already covered by detected variant prop
   if (options.aiArgs?.variants) {
     for (const [name, args] of Object.entries(options.aiArgs.variants)) {
-      if (emittedVariantNames.has(name)) continue;
       const variantName = sanitiseIdentifier(name);
+      if (emittedNames.has(variantName)) continue;
+      emittedNames.add(variantName);
       lines.push(``);
       lines.push(`export const ${variantName}: Story = {`);
       lines.push(`  args: {`);

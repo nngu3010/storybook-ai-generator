@@ -1,4 +1,5 @@
 import type { ComponentMeta, PropMeta } from '../parser/componentParser.js';
+import { extractStringLiterals } from '../utils/stringLiterals.js';
 import { getDefaultArg, isComponentTypeProp, isReactNodeType, type ComponentRef } from '../mapper/typeMapper.js';
 import { detectVariantProp, generateVariantStories } from '../mapper/variantDetector.js';
 import type { AiStoryArgs } from './argGenerator.js';
@@ -604,15 +605,7 @@ function isStringLiteralUnion(clean: string): boolean {
   return extractStringLiterals(clean).length > 0;
 }
 
-function extractStringLiterals(typeName: string): string[] {
-  const parts = typeName.split('|').map((p) => p.trim());
-  const literals: string[] = [];
-  for (const part of parts) {
-    const match = part.match(/^['"](.*)['"]$/);
-    if (match) literals.push(match[1]);
-  }
-  return literals;
-}
+// extractStringLiterals imported from ../utils/stringLiterals.js
 
 // ---------------------------------------------------------------------------
 // Object/interface inference

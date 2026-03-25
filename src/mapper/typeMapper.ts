@@ -1,4 +1,5 @@
 import type { PropMeta } from '../parser/componentParser.js';
+import { extractStringLiterals } from '../utils/stringLiterals.js';
 
 export interface ArgTypeMeta {
   name: string;
@@ -188,18 +189,7 @@ function isComponentType(typeName: string): boolean {
   return /\b(LucideIcon|IconType|ComponentType|React\.ComponentType|FC|React\.FC|FunctionComponent|React\.FunctionComponent|ForwardRefExoticComponent|React\.ForwardRefExoticComponent|ElementType|React\.ElementType)\b/.test(typeName);
 }
 
-function extractStringLiterals(typeName: string): string[] {
-  const parts = typeName.split('|').map((p) => p.trim());
-  const literals: string[] = [];
-  for (const part of parts) {
-    // Match quoted string literals: 'primary' or "primary"
-    const match = part.match(/^['"](.*)['"]$/);
-    if (match) {
-      literals.push(match[1]);
-    }
-  }
-  return literals;
-}
+// extractStringLiterals imported from ../utils/stringLiterals.js
 
 function extractNumberLiterals(typeName: string): number[] {
   const parts = typeName.split('|').map((p) => p.trim());
