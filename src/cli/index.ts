@@ -78,7 +78,7 @@ program
 
 program
   .command('update')
-  .description('Pull latest changes and rebuild sbook-ai')
+  .description('Check for updates and install the latest version')
   .action(async () => {
     await runUpdate();
   });

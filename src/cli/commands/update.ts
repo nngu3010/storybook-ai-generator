@@ -4,6 +4,8 @@ import path from 'path';
 import url from 'url';
 import { logger } from '../../utils/logger.js';
 
+const PACKAGE_NAME = 'storybook-ai-generator';
+
 /**
  * Resolves the storybook-gen project root by walking up from this file's location.
  * Works whether running from dist/ (linked install) or src/ (dev).
@@ -28,69 +30,106 @@ function run(cmd: string, cwd: string): string {
   return execSync(cmd, { cwd, stdio: 'pipe' }).toString().trim();
 }
 
+/** Check if this installation is a git clone (dev) vs npm install. */
+function isGitInstall(projectRoot: string): boolean {
+  try {
+    run('git rev-parse --git-dir', projectRoot);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Fetch the latest version from the npm registry. */
+function fetchLatestVersion(): string | undefined {
+  try {
+    return run(`npm view ${PACKAGE_NAME} version`, process.cwd());
+  } catch {
+    return undefined;
+  }
+}
+
 export async function runUpdate(): Promise<void> {
   const projectRoot = resolveProjectRoot();
-  logger.info(`Updating storybook-gen at: ${projectRoot}`);
+  const currentVersion = readVersion(projectRoot);
+  logger.info(`Current version: ${currentVersion}`);
 
-  const before = readVersion(projectRoot);
-  logger.info(`Current version: ${before}`);
-
-  // Check this is a git repo
-  const isGit = (() => {
-    try { run('git rev-parse --git-dir', projectRoot); return true; } catch { return false; }
-  })();
-
-  let dirty = false;
-
-  if (isGit) {
-    // Check for uncommitted changes
-    dirty = run('git status --porcelain', projectRoot).length > 0;
-    if (dirty) {
-      logger.warn('Working directory has uncommitted changes — stashing before pull...');
-      run('git stash', projectRoot);
-    }
-
-    // Pull latest
-    logger.info('Pulling latest changes...');
-    try {
-      const pullOutput = run('git pull --ff-only', projectRoot);
-      if (pullOutput.includes('Already up to date')) {
-        logger.info('Already up to date.');
-        if (dirty) run('git stash pop', projectRoot);
-        logger.info(`Version: ${before} (no change)`);
-        return;
-      }
-      console.log(pullOutput);
-    } catch (err) {
-      logger.error(`git pull failed: ${(err as Error).message}`);
-      if (dirty) run('git stash pop', projectRoot);
-      process.exit(1);
-    }
+  if (isGitInstall(projectRoot)) {
+    await updateFromGit(projectRoot, currentVersion);
   } else {
-    logger.warn('No git repository found — skipping pull, rebuilding from source.');
+    await updateFromNpm(currentVersion);
   }
+}
 
-  // Rebuild
-  logger.info('Rebuilding...');
-  try {
-    run('npm run build', projectRoot);
-  } catch (err) {
-    logger.error(`Build failed: ${(err as Error).message}`);
-    if (dirty) run('git stash pop', projectRoot);
+async function updateFromNpm(currentVersion: string): Promise<void> {
+  logger.info('Checking npm registry for updates...');
+
+  const latest = fetchLatestVersion();
+  if (!latest) {
+    logger.error(`Could not reach npm registry for ${PACKAGE_NAME}.`);
     process.exit(1);
   }
 
-  if (dirty) {
-    logger.info('Restoring stashed changes...');
-    run('git stash pop', projectRoot);
+  if (latest === currentVersion) {
+    logger.success(`Already on the latest version (${currentVersion}).`);
+    return;
   }
 
-  const after = readVersion(projectRoot);
+  logger.info(`New version available: ${currentVersion} → ${latest}`);
+  logger.info('Installing update...');
 
-  console.log('');
-  if (before !== after) {
-    logger.success(`Updated: ${before} → ${after}`);
-  } else {
-    logger.success(`Rebuilt successfully (version: ${after})`);
+  try {
+    const output = run(`npm install -g ${PACKAGE_NAME}@latest`, process.cwd());
+    if (output) console.log(output);
+    logger.success(`Updated: ${currentVersion} → ${latest}`);
+  } catch (err) {
+    logger.error(`npm install failed: ${(err as Error).message}`);
+    logger.info(`You can update manually: npm install -g ${PACKAGE_NAME}@latest`);
+    process.exit(1);
+  }
+}
+
+async function updateFromGit(projectRoot: string, currentVersion: string): Promise<void> {
+  logger.info(`Updating from git at: ${projectRoot}`);
+
+  // Check for uncommitted changes
+  const dirty = run('git status --porcelain', projectRoot).length > 0;
+  if (dirty) {
+    logger.warn('Working directory has uncommitted changes — stashing before pull...');
+    run('git stash', projectRoot);
+  }
+
+  try {
+    logger.info('Pulling latest changes...');
+    const pullOutput = run('git pull --ff-only', projectRoot);
+    if (pullOutput.includes('Already up to date')) {
+      logger.info('Already up to date.');
+      if (dirty) run('git stash pop', projectRoot);
+      logger.info(`Version: ${currentVersion} (no change)`);
+      return;
+    }
+    console.log(pullOutput);
+
+    logger.info('Rebuilding...');
+    run('npm run build', projectRoot);
+
+    if (dirty) {
+      logger.info('Restoring stashed changes...');
+      run('git stash pop', projectRoot);
+    }
+
+    const after = readVersion(projectRoot);
+    console.log('');
+    if (currentVersion !== after) {
+      logger.success(`Updated: ${currentVersion} → ${after}`);
+    } else {
+      logger.success(`Rebuilt successfully (version: ${after})`);
+    }
+  } catch (err) {
+    if (dirty) {
+      try { run('git stash pop', projectRoot); } catch { /* ignore */ }
+    }
+    logger.error(`Update failed: ${(err as Error).message}`);
+    process.exit(1);
   }
 }
