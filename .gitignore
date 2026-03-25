@@ -12,3 +12,8 @@ storybook-static
 .windsurfrules
 .github/copilot-instructions.md
 .mcp.json
+
+# Test artifacts
+tests/.tmp-*
+tests/fixtures/*.stories.ts
+vitest.config.ts.timestamp-*
