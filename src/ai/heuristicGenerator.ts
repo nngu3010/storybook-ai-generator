@@ -4,7 +4,7 @@ import { getDefaultArg, isComponentTypeProp, isReactNodeType, type ComponentRef 
 import { detectVariantProp, generateVariantStories } from '../mapper/variantDetector.js';
 import type { AiStoryArgs } from './argGenerator.js';
 import type { ProjectContext } from '../mcp/contextScanner.js';
-import { extractArgsFromUsages, type ExtractedUsageArgs } from './usageExtractor.js';
+import { extractArgsFromUsages, extractObjectArgsFromUsages, type ExtractedUsageArgs, type ExtractedObjectArgs } from './usageExtractor.js';
 import { extractValuesFromDataFiles, mergeExtracted } from './dataExtractor.js';
 import type { ResolvedTypeDefinition } from '../parser/typeResolver.js';
 import { applyPropRelationships } from './propRelationships.js';
@@ -18,6 +18,7 @@ export function generateHeuristicArgs(
   meta: ComponentMeta,
   projectContext?: ProjectContext,
   resolvedTypes?: Map<string, ResolvedTypeDefinition>,
+  dir?: string,
 ): AiStoryArgs {
   const variantProp = detectVariantProp(meta.props);
   const variantStories = variantProp ? generateVariantStories(variantProp) : [];
@@ -30,11 +31,22 @@ export function generateHeuristicArgs(
     ? extractValuesFromDataFiles(projectContext.mockDataFiles, meta.props)
     : {};
   const extracted = mergeExtracted(fromUsage, fromData);
+
+  // Extract object shapes from variable references in JSX usage
+  const extractedObjects: ExtractedObjectArgs = (projectContext && dir)
+    ? extractObjectArgsFromUsages(projectContext.componentUsages, meta.props, dir)
+    : {};
+
   const defaultArgs: Record<string, unknown> = {};
 
   for (const prop of meta.props) {
     if (isFunctionProp(prop.typeName)) continue;
-    defaultArgs[prop.name] = inferValue(prop, context, 0, extracted, resolvedTypes);
+    // If we found a real object from variable resolution, use it directly
+    if (extractedObjects[prop.name]) {
+      defaultArgs[prop.name] = extractedObjects[prop.name];
+    } else {
+      defaultArgs[prop.name] = inferValue(prop, context, 0, extracted, resolvedTypes);
+    }
   }
 
   const variants: Record<string, Record<string, unknown>> = {};

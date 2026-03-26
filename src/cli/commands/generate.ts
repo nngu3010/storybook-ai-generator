@@ -125,7 +125,7 @@ export async function runGenerate(dir: string, opts: GenerateOptions = {}): Prom
         if (aiClient) {
           aiArgs = await generateAiArgs(meta, aiClient, projectContext, resolvedTypes, project);
         } else {
-          aiArgs = generateHeuristicArgs(meta, projectContext, resolvedTypes);
+          aiArgs = generateHeuristicArgs(meta, projectContext, resolvedTypes, resolvedDir);
         }
       }
 

@@ -233,6 +233,23 @@ const TOOLS = [
       required: ['dir', 'component'],
     },
   },
+  {
+    name: 'test_story',
+    description:
+      'Structurally validate a generated story against its component\'s prop types. Goes beyond ' +
+      'TypeScript compilation (validate_story) to check: (1) all required props have args, ' +
+      '(2) object-typed args match the resolved interface shape, (3) accessed nested paths exist ' +
+      'in the args, (4) enum/union values are valid. Returns a detailed report with specific fix ' +
+      'suggestions. Use after generate_stories to catch runtime crashes BEFORE starting Storybook.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dir: { type: 'string', description: 'Project root directory' },
+        name: { type: 'string', description: 'Component name to test (e.g. "ProductCard")' },
+      },
+      required: ['dir', 'name'],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -379,7 +396,7 @@ async function handleSuggestArgs(dir: string, name: string): Promise<string> {
   addTypeFiles(project, resolvedDir);
   const resolvedTypes = resolvePropsTypes(meta.props, project, typeCache);
   const projectContext = await scanProjectContext(resolvedDir, meta.name);
-  const suggestedArgs = generateHeuristicArgs(meta, projectContext, resolvedTypes);
+  const suggestedArgs = generateHeuristicArgs(meta, projectContext, resolvedTypes, resolvedDir);
 
   return JSON.stringify({ component: meta.name, suggestedArgs }, null, 2);
 }
@@ -434,18 +451,20 @@ async function handleGenerateStories(
     const relativePath = path.basename(filePath);
     let aiArgs = argsMap?.[meta.name];
 
-    // Always run the full pipeline: resolve types + scan context + generate args
+    // Always resolve types for validation (even if custom args were provided)
+    const resolvedTypes = resolvePropsTypes(meta.props, project, typeCache);
+
+    // Run the full pipeline: resolve types + scan context + generate args
     if (!aiArgs) {
-      const resolvedTypes = resolvePropsTypes(meta.props, project, typeCache);
       const projectContext = await scanProjectContext(resolvedDir, meta.name);
       if (aiClient) {
         try {
           aiArgs = await generateAiArgs(meta, aiClient, projectContext, resolvedTypes, project);
         } catch {
-          aiArgs = generateHeuristicArgs(meta, projectContext, resolvedTypes);
+          aiArgs = generateHeuristicArgs(meta, projectContext, resolvedTypes, resolvedDir);
         }
       } else {
-        aiArgs = generateHeuristicArgs(meta, projectContext, resolvedTypes);
+        aiArgs = generateHeuristicArgs(meta, projectContext, resolvedTypes, resolvedDir);
       }
     }
 
@@ -462,11 +481,16 @@ async function handleGenerateStories(
     }
 
     const result = writeStory(filePath, content, { overwrite });
+
+    // Structural validation: check args match prop shapes
+    const validationIssues = validateArgsStructure(meta, aiArgs, resolvedTypes);
+
     results.push({
       component: meta.name,
       file: path.relative(resolvedDir, filePath),
       status: result,
       ...(aiArgs ? { aiArgsApplied: true } : {}),
+      ...(validationIssues.length > 0 ? { validationIssues } : {}),
     });
   }
 
@@ -687,6 +711,255 @@ async function handleGetMockFixtures(
   return JSON.stringify(result, null, 2);
 }
 
+/**
+ * Inline structural validation of generated args against prop types.
+ * Returns an array of issues found.
+ */
+function validateArgsStructure(
+  meta: ComponentMeta,
+  aiArgs: AiStoryArgs | undefined,
+  resolvedTypes: Map<string, ResolvedTypeDefinition>,
+): Array<{ prop: string; issue: string }> {
+  if (!aiArgs) return [];
+  const issues: Array<{ prop: string; issue: string }> = [];
+  const defaultArgs = aiArgs.Default;
+
+  for (const prop of meta.props) {
+    if (!prop.required) continue;
+    if (/^\s*\(.*\)\s*=>\s*\S/.test(prop.typeName) || /^Function$/.test(prop.typeName)) continue;
+
+    // Check required prop exists
+    if (defaultArgs[prop.name] === undefined) {
+      issues.push({ prop: prop.name, issue: `Required prop missing from args` });
+      continue;
+    }
+
+    const value = defaultArgs[prop.name];
+    const cleanType = prop.typeName.split('|').map(t => t.trim()).filter(t => t !== 'undefined' && t !== 'null').join(' | ').trim();
+
+    // Check empty object for complex types
+    if (typeof value === 'object' && value !== null && !Array.isArray(value) && Object.keys(value).length === 0) {
+      let baseType = cleanType;
+      if (baseType.endsWith('[]')) baseType = baseType.slice(0, -2);
+      const resolved = resolvedTypes.get(baseType);
+      if (resolved && resolved.kind === 'interface' && resolved.properties) {
+        const requiredFields = Object.entries(resolved.properties).filter(([, p]) => p.required).map(([n]) => n);
+        if (requiredFields.length > 0) {
+          issues.push({ prop: prop.name, issue: `Empty object {} but ${baseType} needs: ${requiredFields.join(', ')}` });
+        }
+      }
+    }
+
+    // Check string value for object type
+    if (typeof value === 'string') {
+      let baseType = cleanType;
+      if (baseType.endsWith('[]')) baseType = baseType.slice(0, -2);
+      const resolved = resolvedTypes.get(baseType);
+      if (resolved && resolved.kind === 'interface') {
+        issues.push({ prop: prop.name, issue: `String value but type ${baseType} expects an object` });
+      }
+    }
+
+    // Check accessed paths exist
+    if (prop.accessedPaths && typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      for (const accessPath of prop.accessedPaths) {
+        let current: unknown = value;
+        let missing = false;
+        for (const segment of accessPath) {
+          if (typeof current === 'object' && current !== null && segment in (current as Record<string, unknown>)) {
+            current = (current as Record<string, unknown>)[segment];
+          } else {
+            missing = true;
+            break;
+          }
+        }
+        if (missing) {
+          issues.push({ prop: `${prop.name}.${accessPath.join('.')}`, issue: `Accessed path missing from args` });
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+async function handleTestStory(dir: string, name: string): Promise<string> {
+  const resolved = await resolveComponentMeta(dir, name);
+  if ('error' in resolved) return resolved.error;
+  const { meta, project, filePath } = resolved;
+
+  const resolvedDir = path.resolve(dir);
+  const baseName = path.basename(filePath).replace(/\.(tsx?|jsx?)$/, '');
+
+  // Find the story file
+  const storyExtensions = ['.stories.ts', '.stories.tsx', '.stories.generated.ts'];
+  let storyPath: string | null = null;
+  for (const ext of storyExtensions) {
+    const candidate = path.join(path.dirname(filePath), `${baseName}${ext}`);
+    if (fs.existsSync(candidate)) {
+      storyPath = candidate;
+      break;
+    }
+  }
+
+  if (!storyPath) {
+    return JSON.stringify({
+      status: 'error',
+      component: name,
+      error: `No story file found for ${name}`,
+    }, null, 2);
+  }
+
+  const storyContent = fs.readFileSync(storyPath, 'utf-8');
+
+  // Resolve types for structural validation
+  addTypeFiles(project, resolvedDir);
+  const resolvedTypes = resolvePropsTypes(meta.props, project, typeCache);
+
+  const issues: Array<{ severity: 'error' | 'warning'; prop: string; message: string; fix?: string }> = [];
+
+  // Extract args from the story file
+  const argsMatch = storyContent.match(/export const Default: Story = \{[\s\S]*?args:\s*\{([\s\S]*?)\}\s*[,}]/);
+  const argsBlock = argsMatch?.[1] ?? '';
+
+  // Check 1: Required props have args
+  for (const prop of meta.props) {
+    if (!prop.required) continue;
+    if (/^\s*\(.*\)\s*=>\s*\S/.test(prop.typeName) || /^Function$/.test(prop.typeName)) continue;
+
+    // Check if prop name appears in the args block
+    const propPattern = new RegExp(`\\b${prop.name}\\b\\s*:`);
+    if (!propPattern.test(argsBlock)) {
+      issues.push({
+        severity: 'error',
+        prop: prop.name,
+        message: `Required prop "${prop.name}" (${prop.typeName}) is missing from Default story args`,
+        fix: `Add ${prop.name} to the args object with a value matching type ${prop.typeName}`,
+      });
+    }
+  }
+
+  // Check 2: Object-typed args match resolved interface shapes
+  for (const prop of meta.props) {
+    const cleanType = prop.typeName.split('|').map(t => t.trim()).filter(t => t !== 'undefined' && t !== 'null').join(' | ').trim();
+    let baseType = cleanType;
+    if (baseType.endsWith('[]')) baseType = baseType.slice(0, -2);
+    const arrayMatch = baseType.match(/^Array<(.+)>$/);
+    if (arrayMatch) baseType = arrayMatch[1];
+
+    const resolved = resolvedTypes.get(baseType);
+    if (!resolved || resolved.kind !== 'interface' || !resolved.properties) continue;
+
+    // Check if this prop has args and if the args are an empty object
+    const emptyObjPattern = new RegExp(`\\b${prop.name}\\b\\s*:\\s*\\{\\s*\\}`);
+    if (emptyObjPattern.test(argsBlock)) {
+      const requiredFields = Object.entries(resolved.properties)
+        .filter(([, p]) => p.required)
+        .map(([name]) => name);
+      issues.push({
+        severity: 'error',
+        prop: prop.name,
+        message: `Prop "${prop.name}" is an empty object {} but type ${baseType} requires fields: ${requiredFields.join(', ')}`,
+        fix: `Provide a complete ${baseType} object with at least: ${requiredFields.join(', ')}`,
+      });
+    }
+
+    // Check if prop is a plain string but should be an object
+    const stringArgPattern = new RegExp(`\\b${prop.name}\\b\\s*:\\s*["']`);
+    if (stringArgPattern.test(argsBlock)) {
+      issues.push({
+        severity: 'error',
+        prop: prop.name,
+        message: `Prop "${prop.name}" is a string but should be type ${baseType} (an object)`,
+        fix: `Replace the string value with a ${baseType} object`,
+      });
+    }
+  }
+
+  // Check 3: Accessed paths exist in args
+  for (const prop of meta.props) {
+    if (!prop.accessedPaths || prop.accessedPaths.length === 0) continue;
+
+    // Check if prop appears in args at all
+    const propPattern = new RegExp(`\\b${prop.name}\\b\\s*:`);
+    if (!propPattern.test(argsBlock)) continue; // Already caught by check 1
+
+    // For each accessed path, check if it exists in the generated object
+    // We can't easily parse the JS object from the story, but we can check
+    // if the property names appear in the arg block for this prop
+    for (const accessPath of prop.accessedPaths) {
+      const deepProp = accessPath[0]; // First level of nesting
+      if (!deepProp) continue;
+
+      // Simple check: does the nested property name appear near the prop in the args block?
+      // Look for prop: { ... deepProp: ... }
+      const propBlockMatch = storyContent.match(
+        new RegExp(`\\b${prop.name}\\b\\s*:\\s*\\{([^}]*(?:\\{[^}]*\\}[^}]*)*)\\}`, 's'),
+      );
+      if (propBlockMatch) {
+        const propBlock = propBlockMatch[1];
+        if (!new RegExp(`\\b${deepProp}\\b\\s*:`).test(propBlock)) {
+          issues.push({
+            severity: 'warning',
+            prop: `${prop.name}.${accessPath.join('.')}`,
+            message: `Component accesses "${prop.name}.${accessPath.join('.')}" but this path may be missing from args`,
+            fix: `Ensure ${prop.name} has a "${deepProp}" property`,
+          });
+        }
+      }
+    }
+  }
+
+  // Check 4: Enum/union values are valid
+  for (const prop of meta.props) {
+    const cleanType = prop.typeName.split('|').map(t => t.trim()).filter(t => t !== 'undefined' && t !== 'null').join(' | ').trim();
+    const resolved = resolvedTypes.get(cleanType);
+
+    // Check string literal unions directly from the type
+    const literalMatch = cleanType.match(/^["'].*["'](\s*\|\s*["'].*["'])+$/);
+    if (literalMatch) {
+      const validValues = cleanType.split('|').map(v => v.trim().replace(/^["']|["']$/g, ''));
+      // Find the arg value
+      const argValueMatch = argsBlock.match(new RegExp(`\\b${prop.name}\\b\\s*:\\s*["']([^"']+)["']`));
+      if (argValueMatch && !validValues.includes(argValueMatch[1])) {
+        issues.push({
+          severity: 'error',
+          prop: prop.name,
+          message: `Value "${argValueMatch[1]}" is not a valid option for ${prop.name}. Valid values: ${validValues.join(', ')}`,
+          fix: `Use one of: ${validValues.map(v => `"${v}"`).join(', ')}`,
+        });
+      }
+    }
+
+    // Check enum values
+    if (resolved && resolved.kind === 'enum' && resolved.enumMembers) {
+      const validValues = resolved.enumMembers.map(m => String(m.value));
+      const argValueMatch = argsBlock.match(new RegExp(`\\b${prop.name}\\b\\s*:\\s*["']([^"']+)["']`));
+      if (argValueMatch && !validValues.includes(argValueMatch[1])) {
+        issues.push({
+          severity: 'warning',
+          prop: prop.name,
+          message: `Value "${argValueMatch[1]}" may not be a valid ${cleanType} enum value. Known values: ${validValues.join(', ')}`,
+          fix: `Use one of: ${validValues.map(v => `"${v}"`).join(', ')}`,
+        });
+      }
+    }
+  }
+
+  const errors = issues.filter(i => i.severity === 'error');
+  const warnings = issues.filter(i => i.severity === 'warning');
+
+  return JSON.stringify({
+    status: errors.length > 0 ? 'fail' : (warnings.length > 0 ? 'warn' : 'pass'),
+    component: name,
+    storyFile: path.relative(resolvedDir, storyPath),
+    errors: errors.length > 0 ? errors : undefined,
+    warnings: warnings.length > 0 ? warnings : undefined,
+    summary: `${errors.length} error(s), ${warnings.length} warning(s)`,
+    propsChecked: meta.props.length,
+  }, null, 2);
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -803,6 +1076,12 @@ export async function startMcpServer(version: string): Promise<void> {
           text = await handleGetMockFixtures(
             input.dir as string,
             input.component as string,
+          );
+          break;
+        case 'test_story':
+          text = await handleTestStory(
+            input.dir as string,
+            input.name as string,
           );
           break;
         default:
