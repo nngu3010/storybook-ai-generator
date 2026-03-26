@@ -21,6 +21,8 @@ export interface PropMeta {
   defaultValue?: string;
   description?: string;    // from JSDoc
   deprecated?: boolean;
+  /** Nested property paths accessed in the component body (e.g., [['category'], ['price','amount']]) */
+  accessedPaths?: string[][];
 }
 
 export interface ComponentMeta {
@@ -93,6 +95,15 @@ export function parseComponent(project: Project, filePath: string): ComponentMet
   // Resolve the props type
   const paramType = firstParam.getType();
   const props = extractProps(paramType, sourceFile, defaultValues);
+
+  // Trace property accesses in the component body to know which nested paths are used
+  const accessMap = tracePropAccesses(defaultExport, firstParam);
+  for (const prop of props) {
+    const paths = accessMap.get(prop.name);
+    if (paths && paths.length > 0) {
+      prop.accessedPaths = paths;
+    }
+  }
 
   return { name: componentName, filePath, props };
 }
@@ -456,6 +467,113 @@ function isFromNodeModules(node: Node | undefined): boolean {
   const srcFile = node.getSourceFile();
   const filePath = srcFile.getFilePath();
   return filePath.includes('node_modules');
+}
+
+// ---------------------------------------------------------------------------
+// Prop access tracing — walks the component body to find nested property
+// accesses on props (e.g., product.category, order.items.length)
+// ---------------------------------------------------------------------------
+
+/**
+ * Traces property access chains on the props parameter in the component body.
+ * Returns a Map from prop name to arrays of access paths.
+ * e.g., `props.product.category` → Map { "product" => [["category"]] }
+ * For destructured props like `({ product })`, traces `product.category`.
+ */
+function tracePropAccesses(
+  fn: FunctionLike,
+  propsParam: ParameterDeclaration,
+): Map<string, string[][]> {
+  const result = new Map<string, string[][]>();
+  const body = Node.isArrowFunction(fn) || Node.isFunctionExpression(fn)
+    ? fn.getBody()
+    : (fn as FunctionDeclaration).getBody();
+  if (!body) return result;
+
+  // Determine prop binding names
+  const nameNode = propsParam.getNameNode();
+  const isDestructured = Node.isObjectBindingPattern(nameNode);
+
+  // Build set of prop names that are destructured (these become local variables)
+  const destructuredNames = new Set<string>();
+  // Also track original names for renamed bindings: { original: renamed }
+  const renamedBindings = new Map<string, string>(); // localName → originalPropName
+  if (isDestructured) {
+    for (const element of nameNode.getElements()) {
+      const originalName = element.getPropertyNameNode()?.getText() ?? element.getName();
+      const localName = element.getName();
+      destructuredNames.add(originalName);
+      if (localName !== originalName) {
+        renamedBindings.set(localName, originalName);
+      }
+    }
+  }
+
+  // The parameter name when not destructured (e.g., `props`)
+  const propsParamName = isDestructured ? null : propsParam.getName();
+
+  // Walk all property access expressions in the body
+  const propertyAccesses = body.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression);
+
+  for (const access of propertyAccesses) {
+    const chain = collectAccessChain(access);
+    if (chain.length < 2) continue;
+
+    let propName: string;
+    let pathStart: number;
+
+    if (propsParamName && chain[0] === propsParamName) {
+      // props.product.category → propName="product", path=["category"]
+      propName = chain[1];
+      pathStart = 2;
+    } else if (isDestructured) {
+      // Destructured: product.category → propName="product", path=["category"]
+      const localName = chain[0];
+      const original = renamedBindings.get(localName) ?? localName;
+      if (destructuredNames.has(original) || renamedBindings.has(localName)) {
+        propName = original;
+        pathStart = 1;
+      } else {
+        continue;
+      }
+    } else {
+      continue;
+    }
+
+    const path = chain.slice(pathStart);
+    if (path.length === 0) continue;
+
+    if (!result.has(propName)) {
+      result.set(propName, []);
+    }
+    const paths = result.get(propName)!;
+    // Deduplicate
+    if (!paths.some(p => p.length === path.length && p.every((v, i) => v === path[i]))) {
+      paths.push(path);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Collect the full access chain from a PropertyAccessExpression.
+ * e.g., `product.category.name` → ['product', 'category', 'name']
+ * Stops at the leftmost identifier (skipping method calls, etc.)
+ */
+function collectAccessChain(node: Node): string[] {
+  if (Node.isPropertyAccessExpression(node)) {
+    const expr = node.getExpression();
+    const name = node.getName();
+    const chain = collectAccessChain(expr);
+    chain.push(name);
+    return chain;
+  }
+  if (Node.isIdentifier(node)) {
+    return [node.getText()];
+  }
+  // Stop at non-identifier/non-access (e.g., function calls, element access)
+  return [];
 }
 
 // ---------------------------------------------------------------------------

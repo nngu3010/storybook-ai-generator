@@ -7,6 +7,7 @@ import {
 import path from 'path';
 import { findComponents } from '../detector/componentFinder.js';
 import { buildProgram } from './programBuilder.js';
+import type { PropMeta } from './componentParser.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -275,6 +276,67 @@ function getTypeName(type: Type, sourceFile: SourceFile): string {
   // Clean up long type texts
   if (text.length > 50) return text.slice(0, 50) + '...';
   return text;
+}
+
+// ---------------------------------------------------------------------------
+// Shared prop type resolution (used by both CLI and MCP)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve complex prop types using a ts-morph Project.
+ * Returns a Map from type name to its resolved definition.
+ * Uses a cache across the entire run to avoid redundant resolution.
+ */
+export function resolvePropsTypes(
+  props: PropMeta[],
+  project: Project,
+  cache: Map<string, ResolvedTypeDefinition | null>,
+): Map<string, ResolvedTypeDefinition> {
+  const result = new Map<string, ResolvedTypeDefinition>();
+
+  for (const prop of props) {
+    const typeName = extractTypeName(prop.typeName);
+    if (!typeName || result.has(typeName)) continue;
+
+    if (cache.has(typeName)) {
+      const cached = cache.get(typeName);
+      if (cached) result.set(typeName, cached);
+      continue;
+    }
+
+    const resolved = resolveTypeDefinitionFromProject(project, typeName);
+    cache.set(typeName, resolved);
+    if (resolved) result.set(typeName, resolved);
+  }
+
+  return result;
+}
+
+/**
+ * Extract the base named type from a type string.
+ * Returns null for primitives, functions, React types, etc.
+ */
+export function extractTypeName(typeName: string): string | null {
+  let clean = typeName.trim();
+  // Strip nullable
+  clean = clean.split('|').map(t => t.trim()).filter(t => t !== 'undefined' && t !== 'null').join(' | ');
+  // Strip array suffix
+  if (clean.endsWith('[]')) clean = clean.slice(0, -2);
+  const arrayMatch = clean.match(/^Array<(.+)>$/);
+  if (arrayMatch) clean = arrayMatch[1];
+  clean = clean.trim();
+
+  // Skip primitives, functions, React types, unions, intersections
+  const skip = ['string', 'number', 'boolean', 'any', 'unknown', 'never', 'void', 'null', 'undefined'];
+  if (skip.includes(clean)) return null;
+  if (/^['"]/.test(clean) || /^\(/.test(clean)) return null;
+  if (clean.includes(' | ') || clean.includes(' & ')) return null;
+  if (/^(React\.|JSX\.)/.test(clean)) return null;
+  if (/^Record</.test(clean) || /^\{/.test(clean)) return null;
+  if (/\b(ReactNode|ReactElement|LucideIcon|IconType|ComponentType|FC|FunctionComponent|ElementType|ForwardRefExoticComponent)\b/.test(clean)) return null;
+  if (!/^[A-Z]/.test(clean)) return null;
+
+  return clean;
 }
 
 /**

@@ -14,7 +14,11 @@ import { generateHeuristicArgs } from '../ai/heuristicGenerator.js';
 import { categorizeHint } from '../ai/heuristicGenerator.js';
 import { scanProjectContext } from './contextScanner.js';
 import { generateAiArgs, createAiClient, type AiStoryArgs } from '../ai/argGenerator.js';
-import { resolveTypeDefinition } from '../parser/typeResolver.js';
+import { resolveTypeDefinition, addTypeFiles, resolvePropsTypes, type ResolvedTypeDefinition } from '../parser/typeResolver.js';
+import type { Project } from 'ts-morph';
+
+// Module-level type cache shared across MCP calls within a session
+const typeCache = new Map<string, ResolvedTypeDefinition | null>();
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -263,9 +267,10 @@ async function handleListComponents(dir: string): Promise<string> {
 }
 
 async function handleGetComponent(dir: string, name: string): Promise<string> {
-  const meta = await resolveComponentMeta(dir, name);
+  const resolved = await resolveComponentMeta(dir, name);
 
-  if ('error' in meta) return meta.error;
+  if ('error' in resolved) return resolved.error;
+  const { meta } = resolved;
 
   // Variant detection
   const variantProp = detectVariantProp(meta.props);
@@ -305,6 +310,7 @@ async function handleGetComponent(dir: string, name: string): Promise<string> {
       ...(p.defaultValue !== undefined ? { default: p.defaultValue } : {}),
       ...(p.description ? { description: p.description } : {}),
       ...(p.deprecated ? { deprecated: true } : {}),
+      ...(p.accessedPaths ? { accessedPaths: p.accessedPaths } : {}),
     })),
     ...(variantInfo ? { variantProp: variantInfo } : {}),
     argTypes,
@@ -315,11 +321,12 @@ async function handleGetComponent(dir: string, name: string): Promise<string> {
 }
 
 async function handleGetStory(dir: string, name: string): Promise<string> {
-  const meta = await resolveComponentMeta(dir, name);
+  const resolved = await resolveComponentMeta(dir, name);
 
-  if ('error' in meta) return meta.error;
+  if ('error' in resolved) return resolved.error;
+  const { meta, filePath } = resolved;
 
-  const relativePath = path.basename(meta.filePath);
+  const relativePath = path.basename(filePath);
   return buildStoryContent(meta, relativePath);
 }
 
@@ -363,13 +370,16 @@ async function handleCheckStories(dir: string): Promise<string> {
 }
 
 async function handleSuggestArgs(dir: string, name: string): Promise<string> {
-  const meta = await resolveComponentMeta(dir, name);
+  const resolved = await resolveComponentMeta(dir, name);
 
-  if ('error' in meta) return meta.error;
+  if ('error' in resolved) return resolved.error;
+  const { meta, project } = resolved;
 
   const resolvedDir = path.resolve(dir);
+  addTypeFiles(project, resolvedDir);
+  const resolvedTypes = resolvePropsTypes(meta.props, project, typeCache);
   const projectContext = await scanProjectContext(resolvedDir, meta.name);
-  const suggestedArgs = generateHeuristicArgs(meta, projectContext);
+  const suggestedArgs = generateHeuristicArgs(meta, projectContext, resolvedTypes);
 
   return JSON.stringify({ component: meta.name, suggestedArgs }, null, 2);
 }
@@ -402,6 +412,10 @@ async function handleGenerateStories(
   }
 
   const project = buildProgram(resolvedDir, componentFiles);
+
+  // Enrich project with all type definition files for cross-file resolution
+  addTypeFiles(project, resolvedDir);
+
   const results: object[] = [];
 
   for (const filePath of componentFiles) {
@@ -420,17 +434,18 @@ async function handleGenerateStories(
     const relativePath = path.basename(filePath);
     let aiArgs = argsMap?.[meta.name];
 
-    // Generate AI args if --ai flag is set and no custom args were provided
-    if (!aiArgs && (aiClient || ai)) {
+    // Always run the full pipeline: resolve types + scan context + generate args
+    if (!aiArgs) {
+      const resolvedTypes = resolvePropsTypes(meta.props, project, typeCache);
       const projectContext = await scanProjectContext(resolvedDir, meta.name);
       if (aiClient) {
         try {
-          aiArgs = await generateAiArgs(meta, aiClient, projectContext);
+          aiArgs = await generateAiArgs(meta, aiClient, projectContext, resolvedTypes, project);
         } catch {
-          aiArgs = generateHeuristicArgs(meta, projectContext);
+          aiArgs = generateHeuristicArgs(meta, projectContext, resolvedTypes);
         }
       } else {
-        aiArgs = generateHeuristicArgs(meta, projectContext);
+        aiArgs = generateHeuristicArgs(meta, projectContext, resolvedTypes);
       }
     }
 
@@ -676,10 +691,16 @@ async function handleGetMockFixtures(
 // Helpers
 // ---------------------------------------------------------------------------
 
+interface ResolvedComponent {
+  meta: ComponentMeta;
+  project: Project;
+  filePath: string;
+}
+
 async function resolveComponentMeta(
   dir: string,
   name: string,
-): Promise<ComponentMeta | { error: string }> {
+): Promise<ResolvedComponent | { error: string }> {
   const resolvedDir = path.resolve(dir);
   const componentFiles = await findComponents(resolvedDir);
 
@@ -708,7 +729,7 @@ async function resolveComponentMeta(
     return { error: `Component "${name}" was skipped: ${meta.skipReason}` };
   }
 
-  return meta;
+  return { meta, project, filePath };
 }
 
 // ---------------------------------------------------------------------------

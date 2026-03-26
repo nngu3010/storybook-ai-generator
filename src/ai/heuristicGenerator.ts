@@ -144,14 +144,23 @@ function inferValue(
 
   // Record / object types — generate meaningful sample data based on prop name
   if (/^Record</.test(clean) || /^\{/.test(clean)) {
-    return inferObjectValue(prop, context);
+    const obj = inferObjectValue(prop, context);
+    if (prop.accessedPaths && prop.accessedPaths.length > 0) {
+      ensureAccessedPaths(obj, prop.accessedPaths);
+    }
+    return obj;
   }
 
   // Named interface/type references (not primitive, not union, not array)
   // These are complex object types like StoreInfo, BannerData, etc.
   if (isNamedObjectType(clean)) {
     const resolvedType = resolvedTypes?.get(clean);
-    return inferObjectValue(prop, context, resolvedType || undefined);
+    const obj = inferObjectValue(prop, context, resolvedType || undefined);
+    // Ensure accessed paths exist in the generated object
+    if (prop.accessedPaths && prop.accessedPaths.length > 0) {
+      ensureAccessedPaths(obj, prop.accessedPaths);
+    }
+    return obj;
   }
 
   // Boolean
@@ -805,7 +814,8 @@ const SAMPLE_NUMBERS: Record<string, number[]> = {
 
 /**
  * Generate an object value by walking the resolved type definition's properties.
- * Uses property names to pick realistic sample values.
+ * Uses property names to pick realistic sample values, delegating to the rich
+ * STRING_PATTERNS and number heuristics for nested properties.
  */
 function generateObjectFromResolvedType(resolved: ResolvedTypeDefinition, variantIndex: number): Record<string, unknown> {
   if (!resolved.properties) return {};
@@ -814,6 +824,11 @@ function generateObjectFromResolvedType(resolved: ResolvedTypeDefinition, varian
 
   for (const [propName, prop] of Object.entries(resolved.properties)) {
     const typeText = prop.type.toLowerCase().trim();
+
+    // Skip function-typed properties
+    if (/^\s*\(.*\)\s*=>\s*\S/.test(prop.type) || typeText === 'function') {
+      continue;
+    }
 
     // Nested object with resolved type
     if (prop.resolved && prop.resolved.kind === 'interface' && prop.resolved.properties) {
@@ -829,8 +844,17 @@ function generateObjectFromResolvedType(resolved: ResolvedTypeDefinition, varian
           generateObjectFromResolvedType(el, 0),
           generateObjectFromResolvedType(el, 1),
         ];
+      } else if (el.kind === 'primitive') {
+        const elText = (el.text ?? '').toLowerCase();
+        if (elText.includes('string')) {
+          result[propName] = ['item-1', 'item-2'];
+        } else if (elText.includes('number')) {
+          result[propName] = [1, 2, 3];
+        } else {
+          result[propName] = ['item-1', 'item-2'];
+        }
       } else {
-        result[propName] = [];
+        result[propName] = ['item-1', 'item-2'];
       }
       continue;
     }
@@ -847,18 +871,13 @@ function generateObjectFromResolvedType(resolved: ResolvedTypeDefinition, varian
       continue;
     }
 
-    // Primitives — use name-based sample values
+    // Primitives — use rich pattern-matching heuristics
     if (typeText.includes('string')) {
-      const key = propName.toLowerCase();
-      const samples = SAMPLE_STRINGS[key];
-      result[propName] = samples ? samples[variantIndex % samples.length] : `Sample ${propName}`;
+      result[propName] = inferNestedStringValue(propName, variantIndex);
       continue;
     }
     if (typeText.includes('number')) {
-      const key = propName.toLowerCase();
-      const samples = SAMPLE_NUMBERS[key]
-        ?? Object.entries(SAMPLE_NUMBERS).find(([k]) => key.endsWith(k))?.[1];
-      result[propName] = samples ? samples[variantIndex % samples.length] : variantIndex + 1;
+      result[propName] = inferNestedNumberValue(propName, variantIndex);
       continue;
     }
     if (typeText.includes('boolean')) {
@@ -871,12 +890,128 @@ function generateObjectFromResolvedType(resolved: ResolvedTypeDefinition, varian
       result[propName] = ['item-1', 'item-2'];
       continue;
     }
+    // Number array
+    if (typeText === 'number[]' || typeText === 'array<number>') {
+      result[propName] = [1, 2, 3];
+      continue;
+    }
 
-    // Fallback for unknown types
-    result[propName] = undefined;
+    // Date types
+    if (typeText.includes('date')) {
+      result[propName] = '2026-03-15';
+      continue;
+    }
+
+    // Fallback: descriptive string rather than undefined
+    result[propName] = `Sample ${propName}`;
   }
 
   return result;
+}
+
+/**
+ * Rich string value inference for nested properties.
+ * Reuses STRING_PATTERNS (40+ regex patterns) before falling back.
+ */
+function inferNestedStringValue(propName: string, variantIndex: number): string {
+  // Fast path: direct lookup
+  const key = propName.toLowerCase();
+  const samples = SAMPLE_STRINGS[key];
+  if (samples) return samples[variantIndex % samples.length];
+
+  // Full pattern matching from STRING_PATTERNS
+  for (const { match, values } of STRING_PATTERNS) {
+    if (match.test(propName)) {
+      return values[variantIndex % values.length];
+    }
+  }
+
+  // Name-based heuristics for common patterns not in STRING_PATTERNS
+  if (key.includes('name')) return ['Example Item', 'Sample Product', 'Test Entry', 'Demo Widget'][variantIndex % 4];
+  if (key.includes('text') || key.includes('content') || key.includes('body'))
+    return ['Example content here.', 'Sample text for preview.', 'Demo content.', 'Placeholder text.'][variantIndex % 4];
+  if (key.includes('slug')) return ['example-item', 'sample-product', 'test-entry', 'demo-widget'][variantIndex % 4];
+  if (key.includes('key') || key.includes('token')) return ['key-001', 'key-002', 'key-003', 'key-004'][variantIndex % 4];
+  if (key.includes('type') || key.includes('kind')) return ['default', 'primary', 'secondary', 'custom'][variantIndex % 4];
+  if (key.includes('path') || key.includes('route')) return ['/home', '/products', '/about', '/contact'][variantIndex % 4];
+  if (key.includes('currency')) return ['USD', 'EUR', 'GBP', 'AUD'][variantIndex % 4];
+  if (key.includes('country')) return ['US', 'GB', 'AU', 'CA'][variantIndex % 4];
+  if (key.includes('phone') || key.includes('mobile')) return ['+1 (555) 123-4567', '+1 (555) 987-6543'][variantIndex % 2];
+  if (key.includes('format')) return ['default', 'compact', 'detailed', 'minimal'][variantIndex % 4];
+
+  return `Sample ${propName}`;
+}
+
+/**
+ * Rich number value inference for nested properties.
+ * Reuses patterns from inferNumberValue for common number semantics.
+ */
+function inferNestedNumberValue(propName: string, variantIndex: number): number {
+  const key = propName.toLowerCase();
+
+  // Direct lookup
+  const samples = SAMPLE_NUMBERS[key]
+    ?? Object.entries(SAMPLE_NUMBERS).find(([k]) => key.endsWith(k))?.[1];
+  if (samples) return samples[variantIndex % samples.length];
+
+  // Pattern-based inference (mirrors inferNumberValue logic)
+  if (key.includes('price') || key.includes('cost') || key.includes('amount') || key.includes('total'))
+    return [9.99, 14.99, 24.99, 4.49][variantIndex % 4];
+  if (key === 'originalprice' || key === 'original_price' || key === 'msrp' || key === 'was_price')
+    return [12.99, 19.99, 29.99, 7.99][variantIndex % 4];
+  if (key.includes('count') || key.includes('quantity') || key.includes('qty'))
+    return [3, 5, 12, 1][variantIndex % 4];
+  if (key.includes('rating') || key.includes('score'))
+    return [4.5, 3.8, 5.0, 4.2][variantIndex % 4];
+  if (key.includes('percent') || key.includes('progress'))
+    return [75, 50, 100, 25][variantIndex % 4];
+  if (key.includes('max') || key.includes('limit')) return 100;
+  if (key.includes('min')) return 0;
+  if (key.includes('step')) return 1;
+  if (key.includes('width') || key.includes('height'))
+    return [320, 480, 640, 200][variantIndex % 4];
+  if (key.includes('delay') || key.includes('duration') || key.includes('timeout')) return 3000;
+  if (key.includes('age')) return [28, 35, 42, 19][variantIndex % 4];
+  if (key.includes('lat')) return [-37.8136, 40.7128, 51.5074, 35.6762][variantIndex % 4];
+  if (key.includes('lng') || key.includes('lon'))
+    return [144.9631, -74.0060, -0.1278, 139.6503][variantIndex % 4];
+
+  return variantIndex + 1;
+}
+
+/**
+ * Ensures that all accessed property paths exist in the generated object.
+ * If a path like ['category', 'name'] is accessed, ensures obj.category.name exists.
+ * Uses heuristic value inference for leaf properties based on the path segment name.
+ */
+function ensureAccessedPaths(obj: Record<string, unknown>, paths: string[][]): void {
+  for (const path of paths) {
+    let current: Record<string, unknown> = obj;
+    for (let i = 0; i < path.length; i++) {
+      const segment = path[i];
+      const isLast = i === path.length - 1;
+
+      if (current[segment] === undefined || current[segment] === null) {
+        if (isLast) {
+          // Leaf — infer a value based on the segment name
+          current[segment] = inferNestedStringValue(segment, 0);
+        } else {
+          // Branch — create nested object
+          current[segment] = {};
+        }
+      }
+
+      if (!isLast) {
+        // Navigate into the nested object (only if it's an object)
+        if (typeof current[segment] === 'object' && current[segment] !== null && !Array.isArray(current[segment])) {
+          current = current[segment] as Record<string, unknown>;
+        } else {
+          // Can't navigate further (value exists but isn't an object)
+          break;
+        }
+      }
+    }
+  }
 }
 
 /**

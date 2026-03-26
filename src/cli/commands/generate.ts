@@ -16,7 +16,7 @@ import { scanRequiredDecorators, type RequiredDecorator } from '../../detector/p
 import { detectProviders, type DetectedProvider } from '../../decorators/providerDetector.js';
 import { scanLayoutProviders } from '../../decorators/layoutScanner.js';
 import type Anthropic from '@anthropic-ai/sdk';
-import { addTypeFiles, resolveTypeDefinitionFromProject, type ResolvedTypeDefinition } from '../../parser/typeResolver.js';
+import { addTypeFiles, resolvePropsTypes, type ResolvedTypeDefinition } from '../../parser/typeResolver.js';
 
 export interface GenerateOptions {
   overwrite?: boolean;
@@ -438,59 +438,3 @@ export function mergeDecorators(
   return merged;
 }
 
-/**
- * Resolve complex prop types using the shared ts-morph Project.
- * Returns a Map from type name to its resolved definition.
- * Uses a cache across the entire run to avoid redundant resolution.
- */
-function resolvePropsTypes(
-  props: import('../../parser/componentParser.js').PropMeta[],
-  project: import('ts-morph').Project,
-  cache: Map<string, ResolvedTypeDefinition | null>,
-): Map<string, ResolvedTypeDefinition> {
-  const result = new Map<string, ResolvedTypeDefinition>();
-
-  for (const prop of props) {
-    const typeName = extractTypeName(prop.typeName);
-    if (!typeName || result.has(typeName)) continue;
-
-    if (cache.has(typeName)) {
-      const cached = cache.get(typeName);
-      if (cached) result.set(typeName, cached);
-      continue;
-    }
-
-    const resolved = resolveTypeDefinitionFromProject(project, typeName);
-    cache.set(typeName, resolved);
-    if (resolved) result.set(typeName, resolved);
-  }
-
-  return result;
-}
-
-/**
- * Extract the base named type from a type string.
- * Returns null for primitives, functions, React types, etc.
- */
-function extractTypeName(typeName: string): string | null {
-  let clean = typeName.trim();
-  // Strip nullable
-  clean = clean.split('|').map(t => t.trim()).filter(t => t !== 'undefined' && t !== 'null').join(' | ');
-  // Strip array suffix
-  if (clean.endsWith('[]')) clean = clean.slice(0, -2);
-  const arrayMatch = clean.match(/^Array<(.+)>$/);
-  if (arrayMatch) clean = arrayMatch[1];
-  clean = clean.trim();
-
-  // Skip primitives, functions, React types, unions, intersections
-  const skip = ['string', 'number', 'boolean', 'any', 'unknown', 'never', 'void', 'null', 'undefined'];
-  if (skip.includes(clean)) return null;
-  if (/^['"]/.test(clean) || /^\(/.test(clean)) return null;
-  if (clean.includes(' | ') || clean.includes(' & ')) return null;
-  if (/^(React\.|JSX\.)/.test(clean)) return null;
-  if (/^Record</.test(clean) || /^\{/.test(clean)) return null;
-  if (/\b(ReactNode|ReactElement|LucideIcon|IconType|ComponentType|FC|FunctionComponent|ElementType|ForwardRefExoticComponent)\b/.test(clean)) return null;
-  if (!/^[A-Z]/.test(clean)) return null;
-
-  return clean;
-}

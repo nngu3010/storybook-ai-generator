@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { globSync } from 'glob';
 
 export type WriteResult = 'written' | 'skipped' | 'conflict';
 
@@ -68,6 +69,20 @@ export function writeStory(
   const storyPath = opts.outputPath ?? path.join(path.dirname(componentPath), `${baseName}${ext}`);
   const dir = path.dirname(storyPath);
 
+  // Check for existing stories with a different extension to prevent duplicate story IDs
+  const existingAlternate = findAlternateStoryFile(baseName, dir, storyPath);
+  if (existingAlternate) {
+    const altContent = fs.readFileSync(existingAlternate, 'utf-8');
+    const altChecksum = extractChecksum(altContent);
+    if (altChecksum) {
+      // It's a generated story with a different extension — replace it
+      fs.unlinkSync(existingAlternate);
+    } else if (!opts.overwrite) {
+      // Hand-written story with different extension — skip to avoid conflict
+      return 'conflict';
+    }
+  }
+
   if (!fs.existsSync(storyPath)) {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(storyPath, content, 'utf-8');
@@ -98,6 +113,26 @@ export function writeStory(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Finds an existing story file with a different extension than the target path.
+ * e.g., if writing ComponentName.stories.ts, checks for .stories.tsx/.stories.js/.stories.jsx
+ */
+function findAlternateStoryFile(baseName: string, dir: string, targetPath: string): string | null {
+  try {
+    const pattern = `${baseName}.stories.{ts,tsx,js,jsx}`;
+    const matches = globSync(pattern, { cwd: dir, absolute: true });
+    const resolvedTarget = path.resolve(targetPath);
+    for (const match of matches) {
+      if (path.resolve(match) !== resolvedTarget) {
+        return match;
+      }
+    }
+  } catch {
+    // glob not available or error — skip
+  }
+  return null;
+}
 
 /**
  * Extracts the checksum from the header comment line:
