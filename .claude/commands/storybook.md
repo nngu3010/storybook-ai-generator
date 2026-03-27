@@ -16,28 +16,47 @@ Find the components directory:
 
 Use `check_stories` to see which stories exist, are outdated, or are missing.
 
-### Step 3: Generate stories (MCP-first workflow)
+### Step 3: Detect runtime providers
+
+Before generating stories, identify what runtime providers the project needs. The tool auto-detects these, but you should understand what was found:
+
+1. **`get_component`** returns a `requiredProviders` field (e.g. `["Redux", "React Router", "React Query"]`) when a component uses hooks that need context wrappers. Check this for every component.
+2. **Provider types and what they mean:**
+   - **Redux** (`useSelector`, `useDispatch`, `useStore`, `connect()`) — needs `<Provider store={...}>`. The tool generates a decorator with `configureStore({ reducer: {} })`. If the component reads specific state slices, warn the user that the mock store may need real reducers/initial state to avoid undefined errors at runtime.
+   - **React Router** (`useNavigate`, `useLocation`, `useParams`) — needs `<MemoryRouter>`. Auto-handled.
+   - **React Query** (`useQuery`, `useMutation`) — needs `<QueryClientProvider>`. Auto-handled, but queries will return loading state unless mocked via MSW or similar.
+   - **Next.js Router** (`useRouter()`, `from 'next/navigation'`) — needs `AppRouterContext.Provider`. Auto-handled.
+   - **Custom contexts** (imports from `*Provider` or `*Context` files) — detected but **cannot be auto-configured**. The tool emits a `TODO` comment. You should:
+     - Read the provider source file to understand what value it expects
+     - Tell the user they need to manually configure these in `.storybook/preview.ts` or in the story's decorators
+3. **Companion files:** When Redux or theme providers are detected, the CLI generates companion files (`mockStore.ts`, `theme.ts`) in `.storybook/`. The MCP workflow handles decorators automatically in the generated story, but if the user's project needs a shared mock store with real reducers, flag this.
+
+### Step 4: Generate stories (MCP-first workflow)
 
 For components that need stories, use the full MCP workflow — this produces the best results with no API key required:
 
 1. **`list_components`** — find all components
 2. For each component needing stories:
-   a. **`get_component`** — get full prop metadata
+   a. **`get_component`** — get full prop metadata. **Check `requiredProviders`** — if present, the generated story will automatically include decorator wrappers for these providers.
    b. **`get_type_definition`** — for every complex prop type (interfaces, objects, arrays of objects), resolve the full type tree. This is the key step — without it, complex props get empty objects.
    c. **`find_usage_examples`** — see how the component is actually used with real prop values
    d. **`get_mock_fixtures`** — find existing test data to reuse
    e. Analyze all context and craft complete, type-correct args
-   f. **`generate_stories`** — generate with your custom args
+   f. **`generate_stories`** — generate with your custom args (decorators are injected automatically based on hook detection)
    g. **`validate_story`** — check the story compiles correctly
-   h. If errors: read the error, fix the args, regenerate (max 3 retries)
+   h. **`test_story`** — structurally validate args match prop shapes (catches runtime crashes)
+   i. If errors: read the error, fix the args, regenerate (max 3 retries)
 3. **`check_stories`** — confirm everything is in sync
 
-### Step 4: Report results
+### Step 5: Report results
 
 Tell the user:
 - How many components found, how many stories generated
+- **Which providers were auto-detected and wrapped** (e.g. "3 components wrapped with Redux Provider, 1 with MemoryRouter")
+- **Any custom context providers that need manual setup** (list the TODO items)
 - Any validation errors and whether they were auto-fixed
 - If stories have conflicts (`.stories.generated.ts` files), explain and let the user decide
+- If Redux was detected, remind the user to populate the mock store with relevant reducers/initial state if components read specific state slices
 
 ## CLI Fallback
 

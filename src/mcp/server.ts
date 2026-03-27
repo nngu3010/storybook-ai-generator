@@ -48,6 +48,8 @@ const TOOLS = [
     description:
       'Get full metadata for a specific component: all props with types, required/optional status, ' +
       'default values, JSDoc descriptions, variant detection, and Storybook argTypes mapping. ' +
+      'Also returns `requiredProviders` (e.g. ["Redux", "React Router"]) when the component uses ' +
+      'hooks that need context wrappers — generate_stories will auto-inject these as decorators. ' +
       'For any prop with a complex type (interface, object, array of objects), follow up with ' +
       'get_type_definition to see the full type structure — this is essential for generating ' +
       'correctly-shaped mock data.',
