@@ -15,7 +15,7 @@ import { categorizeHint } from '../ai/heuristicGenerator.js';
 import { scanProjectContext } from './contextScanner.js';
 import { generateAiArgs, createAiClient, type AiStoryArgs } from '../ai/argGenerator.js';
 import { resolveTypeDefinition, addTypeFiles, resolvePropsTypes, type ResolvedTypeDefinition } from '../parser/typeResolver.js';
-import { scanRequiredDecorators } from '../detector/providerScanner.js';
+import { scanRequiredDecorators, type RequiredDecorator } from '../detector/providerScanner.js';
 import { detectProviders } from '../decorators/providerDetector.js';
 import { scanLayoutProviders } from '../decorators/layoutScanner.js';
 import { providerToDecorator, mergeDecorators } from '../cli/commands/generate.js';
@@ -163,6 +163,34 @@ const TOOLS = [
               },
             },
           },
+        },
+        perStoryDecorators: {
+          type: 'object',
+          description:
+            'Per-story decorator overrides keyed by component name, then story name. ' +
+            'Each decorator has label, imports (string[]), and decorator (JSX wrapper with {children} placeholder). ' +
+            'Use this for connected components that need different mock store states per story. ' +
+            'Example: {"TaskList":{"Loading":[{"label":"Redux","imports":["import { Provider } from \'react-redux\';"],"decorator":"<Provider store={loadingStore}>{children}</Provider>"}]}}',
+          additionalProperties: {
+            type: 'object',
+            additionalProperties: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string', description: 'Provider label (e.g. "Redux")' },
+                  imports: { type: 'array', items: { type: 'string' }, description: 'Import statements needed' },
+                  decorator: { type: 'string', description: 'JSX wrapper code with {children} placeholder' },
+                },
+                required: ['label', 'imports', 'decorator'],
+              },
+            },
+          },
+        },
+        excludeStories: {
+          type: 'object',
+          description: 'Regex pattern string for excludeStories per component. Prevents exported mock data from appearing as stories. Example: {"TaskList":".*Data$|.*State$"}',
+          additionalProperties: { type: 'string' },
         },
         ai: { type: 'boolean', description: 'Use heuristic AI to generate arg values automatically. For best results, craft your own args using get_component + get_type_definition instead.' },
         overwrite: { type: 'boolean', description: 'Overwrite existing hand-edited stories (default: false)' },
@@ -424,6 +452,8 @@ async function handleGenerateStories(
   overwrite?: boolean,
   dryRun?: boolean,
   ai?: boolean,
+  perStoryDecoratorsMap?: Record<string, Record<string, RequiredDecorator[]>>,
+  excludeStoriesMap?: Record<string, string>,
 ): Promise<string> {
   const resolvedDir = path.resolve(dir);
   const componentFiles = await findComponents(resolvedDir);
@@ -487,7 +517,15 @@ async function handleGenerateStories(
     const perComponentDecorators = scanRequiredDecorators(filePath);
     const decorators = mergeDecorators(globalDecorators, perComponentDecorators);
 
-    const content = buildStoryContent(meta, relativePath, { aiArgs, decorators });
+    const perStoryDecs = perStoryDecoratorsMap?.[meta.name];
+    const excludeStoriesPattern = excludeStoriesMap?.[meta.name];
+
+    const content = buildStoryContent(meta, relativePath, {
+      aiArgs,
+      decorators,
+      perStoryDecorators: perStoryDecs,
+      excludeStories: excludeStoriesPattern,
+    });
 
     if (dryRun) {
       results.push({
@@ -1070,6 +1108,8 @@ export async function startMcpServer(version: string): Promise<void> {
             input.overwrite as boolean | undefined,
             input.dryRun as boolean | undefined,
             input.ai as boolean | undefined,
+            input.perStoryDecorators as Record<string, Record<string, RequiredDecorator[]>> | undefined,
+            input.excludeStories as Record<string, string> | undefined,
           );
           break;
         case 'get_type_definition':

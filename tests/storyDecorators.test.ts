@@ -179,3 +179,155 @@ describe('mergeDecorators', () => {
     expect(merged[0].label).toBe('React Query');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Per-story decorators
+// ---------------------------------------------------------------------------
+describe('buildStoryContent — per-story decorators', () => {
+  const reduxDefault: RequiredDecorator = {
+    label: 'Redux',
+    imports: [
+      "import { Provider } from 'react-redux';",
+      "import { configureStore } from '@reduxjs/toolkit';",
+    ],
+    decorator: '<Provider store={configureStore({ reducer: { taskbox: taskboxReducer } })}>{children}</Provider>',
+  };
+
+  const reduxLoading: RequiredDecorator = {
+    label: 'Redux',
+    imports: [
+      "import { Provider } from 'react-redux';",
+      "import { loadingStore } from './mockStore';",
+    ],
+    decorator: '<Provider store={loadingStore}>{children}</Provider>',
+  };
+
+  it('injects decorators on Default story when specified', () => {
+    const content = buildStoryContent(makeMeta(), './CartButton', {
+      perStoryDecorators: { Default: [reduxDefault] },
+    });
+
+    // Default story should have its own decorators
+    const defaultBlock = content.split('export const Default')[1].split('};')[0];
+    expect(defaultBlock).toContain('decorators: [');
+    expect(defaultBlock).toContain('<Provider');
+    expect(defaultBlock).toContain('<Story />');
+  });
+
+  it('injects different decorators on different variants', () => {
+    const content = buildStoryContent(makeMeta(), './CartButton', {
+      aiArgs: {
+        Default: { label: 'Add to Cart' },
+        variants: {
+          Loading: { label: 'Loading...' },
+          Error: { label: 'Retry' },
+        },
+      },
+      perStoryDecorators: {
+        Default: [reduxDefault],
+        Loading: [reduxLoading],
+      },
+    });
+
+    // Default should have taskboxReducer decorator
+    const defaultBlock = content.split('export const Default')[1].split('};')[0];
+    expect(defaultBlock).toContain('taskboxReducer');
+
+    // Loading should have loadingStore decorator
+    const loadingBlock = content.split('export const Loading')[1].split('};')[0];
+    expect(loadingBlock).toContain('loadingStore');
+
+    // Error should have no per-story decorators
+    const errorBlock = content.split('export const Error')[1].split('};')[0];
+    expect(errorBlock).not.toContain('decorators');
+  });
+
+  it('collects per-story decorator imports alongside meta-level imports', () => {
+    const content = buildStoryContent(makeMeta(), './CartButton', {
+      decorators: [{
+        label: 'React Router',
+        imports: ["import { MemoryRouter } from 'react-router-dom';"],
+        decorator: '<MemoryRouter>{children}</MemoryRouter>',
+      }],
+      perStoryDecorators: {
+        Default: [reduxLoading],
+      },
+    });
+
+    // Both meta-level and per-story imports should be present
+    expect(content).toContain("import { MemoryRouter } from 'react-router-dom';");
+    expect(content).toContain("import { Provider } from 'react-redux';");
+    expect(content).toContain("import { loadingStore } from './mockStore';");
+  });
+
+  it('deduplicates imports across meta-level and per-story decorators', () => {
+    const metaDec: RequiredDecorator = {
+      label: 'Redux',
+      imports: ["import { Provider } from 'react-redux';"],
+      decorator: '<Provider store={store}>{children}</Provider>',
+    };
+
+    const content = buildStoryContent(makeMeta(), './CartButton', {
+      decorators: [metaDec],
+      perStoryDecorators: { Default: [reduxDefault] },
+    });
+
+    // "import { Provider } from 'react-redux'" should appear only once
+    const matches = content.match(/import \{ Provider \} from 'react-redux'/g);
+    expect(matches?.length).toBe(1);
+  });
+
+  it('does not add per-story decorators to stories not in the map', () => {
+    const meta = makeMeta({
+      props: [
+        { name: 'variant', typeName: "'primary' | 'secondary'", required: true },
+      ],
+    });
+
+    const content = buildStoryContent(meta, './CartButton', {
+      perStoryDecorators: { Default: [reduxDefault] },
+    });
+
+    // Default has decorators
+    const defaultBlock = content.split('export const Default')[1].split('};')[0];
+    expect(defaultBlock).toContain('decorators');
+
+    // Primary should not have per-story decorators
+    const primaryBlock = content.split('export const Primary')[1].split('};')[0];
+    expect(primaryBlock).not.toContain('decorators');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// excludeStories
+// ---------------------------------------------------------------------------
+describe('buildStoryContent — excludeStories', () => {
+  it('adds excludeStories regex to meta when provided', () => {
+    const content = buildStoryContent(makeMeta(), './CartButton', {
+      excludeStories: '.*Data$|.*State$',
+    });
+
+    expect(content).toContain('excludeStories: /.*Data$|.*State$/,');
+  });
+
+  it('omits excludeStories when not provided', () => {
+    const content = buildStoryContent(makeMeta(), './CartButton', {});
+
+    expect(content).not.toContain('excludeStories');
+  });
+
+  it('works alongside decorators and argTypes', () => {
+    const content = buildStoryContent(makeMeta(), './CartButton', {
+      excludeStories: 'Mock.*',
+      decorators: [{
+        label: 'Redux',
+        imports: ["import { Provider } from 'react-redux';"],
+        decorator: '<Provider store={store}>{children}</Provider>',
+      }],
+    });
+
+    expect(content).toContain('excludeStories: /Mock.*/,');
+    expect(content).toContain('decorators: [');
+    expect(content).toContain("import { Provider } from 'react-redux';");
+  });
+});

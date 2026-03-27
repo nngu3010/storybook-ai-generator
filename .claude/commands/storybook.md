@@ -108,44 +108,61 @@ For each Tier 3 component:
    - Use `get_mock_fixtures` to find `*slice.ts`, `*store.ts` files.
    - Read the slice file previews to extract: slice name, initial state shape, reducer actions.
    - If React Query: note the query keys and expected response shapes.
-3. Call `generate_stories` to get the base story with auto-injected provider decorator.
-4. **Read and enhance the generated story file.** The auto-generated decorator uses `configureStore({ reducer: {} })` — an empty store that will crash if the component reads state. You must:
+3. **Build per-story decorators** with different store states. The `generate_stories` tool natively supports `perStoryDecorators` and `excludeStories` — no manual file editing required:
+   ```json
+   {
+     "dir": "./src/components",
+     "components": ["TaskList"],
+     "args": {
+       "TaskList": {
+         "Default": {},
+         "variants": {
+           "Loading": {},
+           "Error": {}
+         }
+       }
+     },
+     "perStoryDecorators": {
+       "TaskList": {
+         "Default": [{
+           "label": "Redux",
+           "imports": [
+             "import { Provider } from 'react-redux';",
+             "import { configureStore, createSlice } from '@reduxjs/toolkit';"
+           ],
+           "decorator": "<Provider store={configureStore({ reducer: { taskbox: createSlice({ name: 'taskbox', initialState: { tasks: [{id:'1',title:'Task 1',state:'TASK_INBOX'}], status: 'idle', error: null }, reducers: {} }).reducer } })}>{children}</Provider>"
+         }],
+         "Loading": [{
+           "label": "Redux",
+           "imports": [
+             "import { Provider } from 'react-redux';",
+             "import { configureStore, createSlice } from '@reduxjs/toolkit';"
+           ],
+           "decorator": "<Provider store={configureStore({ reducer: { taskbox: createSlice({ name: 'taskbox', initialState: { tasks: [], status: 'loading', error: null }, reducers: {} }).reducer } })}>{children}</Provider>"
+         }],
+         "Error": [{
+           "label": "Redux",
+           "imports": [
+             "import { Provider } from 'react-redux';",
+             "import { configureStore, createSlice } from '@reduxjs/toolkit';"
+           ],
+           "decorator": "<Provider store={configureStore({ reducer: { taskbox: createSlice({ name: 'taskbox', initialState: { tasks: [], status: 'failed', error: 'Something went wrong' }, reducers: {} }).reducer } })}>{children}</Provider>"
+         }]
+       }
+     },
+     "excludeStories": {
+       "TaskList": ".*Data$|.*State$"
+     }
+   }
+   ```
 
-   a. **Read** the generated `.stories.tsx` file.
-   b. **Replace** the empty store decorator with a `Mockstore` wrapper that has real reducers and initial state:
-      ```typescript
-      const MockedState = {
-        tasks: [
-          { id: '1', title: 'Task 1', state: 'TASK_INBOX' },
-          { id: '2', title: 'Task 2', state: 'TASK_INBOX' },
-        ],
-        status: 'idle',
-        error: null,
-      };
+   Key points:
+   - Each story gets its own decorator with a different store state — no shared `Mockstore` wrapper needed
+   - The tool handles import deduplication automatically
+   - `excludeStories` adds a regex to the meta object to prevent exported mock data from appearing as stories
+   - Connected components with no `requiredProviders` don't need per-story decorators — the auto-detected meta-level decorator is sufficient
 
-      const Mockstore = ({ taskboxState, children }: { taskboxState: typeof MockedState; children: React.ReactNode }) => (
-        <Provider store={configureStore({
-          reducer: { taskbox: createSlice({ name: 'taskbox', initialState: taskboxState, reducers: { updateTaskState: (state, action) => { /* ... */ } } }).reducer }
-        })}>
-          {children}
-        </Provider>
-      );
-      ```
-   c. **Add `excludeStories`** to the meta object: `excludeStories: /.*Data$|.*State$/`
-   d. **Create per-story decorators** with different store states:
-      ```typescript
-      export const Default: Story = {
-        decorators: [(Story) => <Mockstore taskboxState={MockedState}><Story /></Mockstore>],
-      };
-      export const Loading: Story = {
-        decorators: [(Story) => <Mockstore taskboxState={{...MockedState, status: 'loading'}}><Story /></Mockstore>],
-      };
-      export const Error: Story = {
-        decorators: [(Story) => <Mockstore taskboxState={{...MockedState, status: 'failed', error: 'Something went wrong'}}><Story /></Mockstore>],
-      };
-      ```
-
-5. `validate_story` → `test_story` on the enhanced file.
+4. `validate_story` → `test_story`.
 
 ---
 
@@ -157,14 +174,15 @@ For each Tier 4 component:
 
 1. Gather context.
 2. **Detect data fetching:** Look for React Query hooks, `fetch`/`axios` calls, `createAsyncThunk` patterns in usage examples and component source.
-3. Call `generate_stories` for the base story.
-4. **Read and enhance the generated story file:**
+3. **Use `generate_stories` with `perStoryDecorators` and `excludeStories`** — same pattern as Tier 3, but with a comprehensive mock store covering all slices the screen and its children need. Create stories for `Default`, `Loading`, and `Error` states.
+4. **Post-generation enhancements** (requires reading and editing the generated file):
 
-   a. **If the project has MSW** (`hasMSW` from Phase 3): Add `parameters.msw.handlers` to each story:
+   a. **If the project has MSW** (`hasMSW` from Phase 3): Read the generated story file and add `parameters.msw.handlers` to each story:
       ```typescript
       import { http, HttpResponse } from 'msw';
 
       export const Default: Story = {
+        // ... existing args and decorators from generate_stories ...
         parameters: {
           msw: {
             handlers: [
@@ -175,23 +193,9 @@ For each Tier 4 component:
           },
         },
       };
-
-      export const Error: Story = {
-        parameters: {
-          msw: {
-            handlers: [
-              http.get('https://api.example.com/tasks', () => {
-                return new HttpResponse(null, { status: 500 });
-              }),
-            ],
-          },
-        },
-      };
       ```
-   b. **If no MSW**: Add a TODO comment recommending MSW installation. Fall back to pre-loaded mock store state.
-   c. **Build comprehensive mock store** covering all slices the screen and its children need.
-   d. **Create stories**: `Default`, `Loading`, `Error`.
-   e. **Optionally add `play` functions** if `hasInteractions` is true:
+   b. **If no MSW**: Add a TODO comment recommending `npm install msw msw-storybook-addon`.
+   c. **Optionally add `play` functions** if `hasInteractions` is true:
       ```typescript
       import { expect, userEvent, waitFor } from '@storybook/test';
 
@@ -202,6 +206,8 @@ For each Tier 4 component:
         },
       };
       ```
+
+   Note: MSW `parameters` and `play` functions still require manual file editing since `generate_stories` does not yet support these fields. However, the core story structure (decorators, args, excludeStories) is now fully generated by the tool.
 
 5. `validate_story` → `test_story`.
 

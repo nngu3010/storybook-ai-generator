@@ -9,8 +9,12 @@ import type { RequiredDecorator } from '../detector/providerScanner.js';
 export interface BuildStoryOptions {
   /** AI-generated args to use instead of defaults */
   aiArgs?: AiStoryArgs;
-  /** Detected provider decorators to inject into the story */
+  /** Detected provider decorators to inject into the story (meta-level, wraps all stories) */
   decorators?: RequiredDecorator[];
+  /** Per-story decorators keyed by story name (e.g. "Loading", "Error"). Overrides meta-level for that story. */
+  perStoryDecorators?: Record<string, RequiredDecorator[]>;
+  /** Regex pattern string for excludeStories in meta (e.g. ".*Data$|.*State$") */
+  excludeStories?: string;
 }
 
 /**
@@ -53,12 +57,32 @@ export function buildStoryContent(
   // Imports
   lines.push(`import type { Meta, StoryObj } from '@storybook/react';`);
 
-  // Decorator imports
+  // Decorator imports (meta-level + per-story, deduped)
   const decorators = options.decorators ?? [];
+  const importsSeen = new Set<string>();
+  const allDecoratorImports: string[] = [];
   for (const dec of decorators) {
     for (const imp of dec.imports) {
-      lines.push(imp);
+      if (!importsSeen.has(imp)) {
+        importsSeen.add(imp);
+        allDecoratorImports.push(imp);
+      }
     }
+  }
+  if (options.perStoryDecorators) {
+    for (const decs of Object.values(options.perStoryDecorators)) {
+      for (const dec of decs) {
+        for (const imp of dec.imports) {
+          if (!importsSeen.has(imp)) {
+            importsSeen.add(imp);
+            allDecoratorImports.push(imp);
+          }
+        }
+      }
+    }
+  }
+  for (const imp of allDecoratorImports) {
+    lines.push(imp);
   }
 
   // Component ref imports (grouped by source)
@@ -82,6 +106,11 @@ export function buildStoryContent(
   lines.push(`  title: '${title}',`);
   lines.push(`  component: ${meta.name},`);
   lines.push(`  tags: ['autodocs'],`);
+
+  // excludeStories
+  if (options.excludeStories) {
+    lines.push(`  excludeStories: /${options.excludeStories}/,`);
+  }
 
   // Decorators
   if (decorators.length > 0) {
@@ -117,6 +146,7 @@ export function buildStoryContent(
     }
     lines.push(`  },`);
   }
+  emitPerStoryDecorators(lines, 'Default', options.perStoryDecorators);
   lines.push(`};`);
 
   // Track all emitted story identifiers (sanitised) to prevent collisions.
@@ -149,6 +179,7 @@ export function buildStoryContent(
     }
 
     lines.push(`  },`);
+    emitPerStoryDecorators(lines, variantName, options.perStoryDecorators);
     lines.push(`};`);
   }
 
@@ -165,6 +196,7 @@ export function buildStoryContent(
         lines.push(`    ${k}: ${serializeArgValue(v)},`);
       }
       lines.push(`  },`);
+      emitPerStoryDecorators(lines, variantName, options.perStoryDecorators);
       lines.push(`};`);
     }
   }
@@ -177,6 +209,22 @@ export function buildStoryContent(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Emit per-story decorators inside a story block if configured for that story name. */
+function emitPerStoryDecorators(
+  lines: string[],
+  storyName: string,
+  perStoryDecorators?: Record<string, RequiredDecorator[]>,
+): void {
+  const decs = perStoryDecorators?.[storyName];
+  if (!decs || decs.length === 0) return;
+  lines.push(`  decorators: [`);
+  for (const dec of decs) {
+    const wrapper = dec.decorator.replace('{children}', '<Story />');
+    lines.push(`    (Story) => (${wrapper}),`);
+  }
+  lines.push(`  ],`);
+}
 
 function computeChecksum(meta: ComponentMeta): string {
   const signature = meta.props.map((p) => `${p.name}:${p.typeName}:${p.required}`).join(',');
