@@ -1,6 +1,6 @@
 {
   "name": "storybook-ai-generator",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "description": "Auto-generate Storybook stories from React/TypeScript components",
   "type": "module",
   "bin": {
