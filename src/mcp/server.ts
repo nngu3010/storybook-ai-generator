@@ -15,6 +15,10 @@ import { categorizeHint } from '../ai/heuristicGenerator.js';
 import { scanProjectContext } from './contextScanner.js';
 import { generateAiArgs, createAiClient, type AiStoryArgs } from '../ai/argGenerator.js';
 import { resolveTypeDefinition, addTypeFiles, resolvePropsTypes, type ResolvedTypeDefinition } from '../parser/typeResolver.js';
+import { scanRequiredDecorators } from '../detector/providerScanner.js';
+import { detectProviders } from '../decorators/providerDetector.js';
+import { scanLayoutProviders } from '../decorators/layoutScanner.js';
+import { providerToDecorator, mergeDecorators } from '../cli/commands/generate.js';
 import type { Project } from 'ts-morph';
 
 // Module-level type cache shared across MCP calls within a session
@@ -317,6 +321,9 @@ async function handleGetComponent(dir: string, name: string): Promise<string> {
     if (hint) hints[p.name] = hint;
   }
 
+  // Detect required provider decorators
+  const requiredDecorators = scanRequiredDecorators(meta.filePath);
+
   const result = {
     name: meta.name,
     file: meta.filePath,
@@ -332,6 +339,7 @@ async function handleGetComponent(dir: string, name: string): Promise<string> {
     ...(variantInfo ? { variantProp: variantInfo } : {}),
     argTypes,
     hints,
+    ...(requiredDecorators.length > 0 ? { requiredProviders: requiredDecorators.map((d) => d.label) } : {}),
   };
 
   return JSON.stringify(result, null, 2);
@@ -433,6 +441,11 @@ async function handleGenerateStories(
   // Enrich project with all type definition files for cross-file resolution
   addTypeFiles(project, resolvedDir);
 
+  // Detect global providers (package.json + layout files)
+  const pkgProviders = detectProviders(resolvedDir);
+  const layoutProviders = scanLayoutProviders(resolvedDir);
+  const globalDecorators = [...pkgProviders, ...layoutProviders].map(providerToDecorator);
+
   const results: object[] = [];
 
   for (const filePath of componentFiles) {
@@ -468,7 +481,11 @@ async function handleGenerateStories(
       }
     }
 
-    const content = buildStoryContent(meta, relativePath, { aiArgs });
+    // Detect provider dependencies: merge global with per-component
+    const perComponentDecorators = scanRequiredDecorators(filePath);
+    const decorators = mergeDecorators(globalDecorators, perComponentDecorators);
+
+    const content = buildStoryContent(meta, relativePath, { aiArgs, decorators });
 
     if (dryRun) {
       results.push({
