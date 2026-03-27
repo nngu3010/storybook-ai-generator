@@ -8,7 +8,7 @@ The core insight: developers already pay for AI through their editor subscriptio
 
 ## Current State (v0.3.x)
 
-- 10 MCP tools for AI editor integration (no API key needed)
+- 11 MCP tools for AI editor integration (no API key needed)
 - AST-based prop extraction via ts-morph with full cross-file type resolution
 - Recursive type definition resolver (up to 6 levels deep)
 - Type-aware heuristic arg generation with 40+ patterns
@@ -28,7 +28,7 @@ The core insight: developers already pay for AI through their editor subscriptio
 
 **Goal:** Give AI editors everything they need to generate production-quality stories.
 
-- [x] **MCP server with 10 tools** — list, get, generate, validate, check, suggest, scan context
+- [x] **MCP server with 11 tools** — list, get, get_story, generate, validate, check, suggest, scan context, type definition, usage examples, mock fixtures
 - [x] **Type resolution MCP tool** — `get_type_definition` resolves full interface trees recursively
 - [x] **Usage example MCP tool** — `find_usage_examples` finds real JSX usage with actual prop values
 - [x] **Story validation MCP tool** — `validate_story` checks TypeScript compilation, enables self-healing loops
